@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Lance 数据集可视化</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #111827; color: #e0e0e0;
+  font-family: 'Segoe UI', sans-serif; font-size: 13px;
+  height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* ── 顶栏 ── */
+#topbar {
+  background: #1f2937; border-bottom: 1px solid #374151;
+  padding: 7px 14px; display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+}
+#topbar h1 { font-size: 14px; color: #f87171; white-space: nowrap; }
+#traj-select { flex: 1; max-width: 480px; background: #374151; color: #e0e0e0; border: 1px solid #4b5563; border-radius: 4px; padding: 4px 8px; }
+#traj-info { color: #9ca3af; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 主体 ── */
+#main {
+  flex: 1; display: grid;
+  grid-template-columns: 210px 1fr 240px;
+  grid-template-rows: 1fr 180px;
+  gap: 3px; padding: 3px; overflow: hidden; min-height: 0;
+}
+
+/* ── 左侧控制 ── */
+#controls {
+  grid-row: 1 / 3; background: #1f2937; border-radius: 6px;
+  padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+}
+.sec { border-bottom: 1px solid #374151; padding-bottom: 10px; }
+.sec:last-child { border-bottom: none; }
+.sec-title { color: #f87171; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+
+#frame-slider { width: 100%; accent-color: #f87171; cursor: pointer; margin: 4px 0; }
+#frame-label { color: #9ca3af; font-size: 11px; }
+
+.play-row { display: flex; gap: 5px; margin-top: 6px; }
+.btn { flex: 1; padding: 5px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; }
+#btn-play { background: #ef4444; color: #fff; }
+#btn-pause { background: #374151; color: #e0e0e0; }
+#btn-play:hover { background: #dc2626; }
+#btn-pause:hover { background: #4b5563; }
+
+.cb-group { display: flex; flex-direction: column; gap: 3px; }
+.cb-row { display: flex; align-items: center; gap: 6px; cursor: pointer; line-height: 1.6; }
+.cb-row input { accent-color: #f87171; cursor: pointer; }
+
+select.small { width: 100%; background: #374151; color: #e0e0e0; border: 1px solid #4b5563; border-radius: 4px; padding: 3px 6px; margin-top: 3px; }
+#curve-select { height: 110px; }
+
+/* ── 3D 视口 ── */
+#viewport {
+  grid-column: 2; grid-row: 1;
+  background: #0a0f1a; border-radius: 6px; overflow: hidden; position: relative;
+}
+#three-canvas { width: 100%; height: 100%; display: block; }
+#viewport-hint { position: absolute; bottom: 6px; right: 8px; color: #4b5563; font-size: 10px; pointer-events: none; }
+.axis-lbl { position: absolute; font-size: 10px; pointer-events: none; transform: translate(-50%, -50%); white-space: nowrap; }
+
+/* ── 视频 ── */
+#video-panel {
+  grid-column: 3; grid-row: 1;
+  background: #1f2937; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden;
+}
+#video-title { color: #f87171; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; padding: 6px 10px; border-bottom: 1px solid #374151; flex-shrink: 0; }
+#video-wrap { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+#video-img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
+#video-none { color: #4b5563; font-size: 12px; }
+
+/* ── 底部：标注时间轴 + 曲线图 ── */
+#bottom {
+  grid-column: 2 / 4; grid-row: 2;
+  background: #1f2937; border-radius: 6px;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#bottom-tabs { display: flex; border-bottom: 1px solid #374151; flex-shrink: 0; }
+.tab-btn {
+  padding: 5px 14px; background: none; border: none; color: #9ca3af;
+  cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent;
+}
+.tab-btn.active { color: #f87171; border-bottom-color: #f87171; }
+#tab-anno, #tab-curve { flex: 1; overflow: hidden; }
+#tab-curve { display: none; }
+
+/* 标注时间轴 */
+#anno-wrap { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; height: 100%; }
+#timeline-canvas { width: 100%; height: 52px; cursor: crosshair; border-radius: 4px; }
+#anno-controls { display: flex; gap: 6px; align-items: center; }
+#anno-label-input { flex: 1; background: #374151; color: #e0e0e0; border: 1px solid #4b5563; border-radius: 4px; padding: 3px 8px; font-size: 12px; }
+.anno-btn { padding: 4px 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
+#btn-anno-add { background: #059669; color: #fff; }
+#btn-anno-del { background: #dc2626; color: #fff; }
+#btn-anno-save { background: #2563eb; color: #fff; }
+.anno-btn:hover { filter: brightness(1.15); }
+#anno-list { overflow-x: auto; display: flex; gap: 6px; flex-wrap: nowrap; font-size: 11px; }
+.anno-tag {
+  background: #374151; border-radius: 3px; padding: 2px 8px;
+  white-space: nowrap; cursor: pointer; border: 1px solid transparent;
+}
+.anno-tag:hover { border-color: #f87171; }
+.anno-tag.selected { border-color: #f87171; background: #4b1c1c; }
+
+/* 曲线图 */
+#curve-wrap { padding: 8px 10px; height: 100%; display: flex; flex-direction: column; gap: 4px; }
+#curve-canvas { width: 100%; flex: 1; }
+
+/* ── 加载遮罩 ── */
+#loading {
+  position: fixed; inset: 0; background: rgba(5,10,20,0.88);
+  display: flex; align-items: center; justify-content: center; z-index: 999; flex-direction: column; gap: 12px;
+}
+#loading.hidden { display: none; }
+.spinner { width: 36px; height: 36px; border: 3px solid #374151; border-top-color: #f87171; border-radius: 50%; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading-msg { color: #9ca3af; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div id="loading-msg">初始化…</div>
+</div>
+
+<div id="topbar">
+  <h1>Lance 可视化</h1>
+  <select id="traj-select"><option>加载中…</option></select>
+  <span id="traj-info"></span>
+</div>
+
+<div id="main">
+  <!-- 左侧控制 -->
+  <div id="controls">
+    <div class="sec">
+      <div class="sec-title">帧控制</div>
+      <input type="range" id="frame-slider" min="0" max="0" value="0">
+      <div id="frame-label">帧 0 / 0</div>
+      <div class="play-row">
+        <button class="btn" id="btn-play">▶ 播放</button>
+        <button class="btn" id="btn-pause">⏸ 暂停</button>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">3D 显示</div>
+      <div class="cb-group">
+        <label class="cb-row"><input type="checkbox" id="cb-mano-mesh" checked> MANO Mesh</label>
+        <label class="cb-row"><input type="checkbox" id="cb-mano-joints"> MANO Joints</label>
+        <label class="cb-row"><input type="checkbox" id="cb-urdf-joints"> URDF Joints</label>
+        <label class="cb-row"><input type="checkbox" id="cb-urdf-mesh"> URDF Mesh</label>
+        <label class="cb-row"><input type="checkbox" id="cb-object" checked> Object</label>
+        <label class="cb-row"><input type="checkbox" id="cb-grid" checked> 网格</label>
+      </div>
+    </div>
+    <div class="sec">
+      <div class="sec-title">视频</div>
+      <select class="small" id="cam-select"></select>
+      <select class="small" id="stream-select">
+        <option value="color">彩色</option>
+        <option value="depth">深度</option>
+      </select>
+    </div>
+    <div class="sec">
+      <div class="sec-title">数据曲线</div>
+      <select class="small" id="curve-select" multiple></select>
+    </div>
+  </div>
+
+  <!-- 3D 视口 -->
+  <div id="viewport">
+    <canvas id="three-canvas"></canvas>
+    <div id="axis-labels" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;"></div>
+    <div id="viewport-hint">左键旋转 · 右键平移 · 滚轮缩放</div>
+  </div>
+
+  <!-- 视频 -->
+  <div id="video-panel">
+    <div id="video-title">📹 视频流</div>
+    <div id="video-wrap">
+      <img id="video-img" alt="">
+      <span id="video-none">无视频</span>
+    </div>
+  </div>
+
+  <!-- 底部：标注 + 曲线 -->
+  <div id="bottom">
+    <div id="bottom-tabs">
+      <button class="tab-btn active" id="tab-btn-anno" onclick="switchTab('anno')">🏷 时间轴标注</button>
+      <button class="tab-btn" id="tab-btn-curve" onclick="switchTab('curve')">📈 数据曲线</button>
+    </div>
+    <div id="tab-anno">
+      <div id="anno-wrap">
+        <canvas id="timeline-canvas"></canvas>
+        <div id="anno-controls">
+          <input id="anno-label-input" type="text" placeholder="标注标签…" value="grasp">
+          <button class="anno-btn" id="btn-anno-add" title="在当前帧范围添加标注">+ 添加标注</button>
+          <button class="anno-btn" id="btn-anno-del">🗑 删除选中</button>
+          <button class="anno-btn" id="btn-anno-save">💾 保存</button>
+        </div>
+        <div id="anno-list"></div>
+      </div>
+    </div>
+    <div id="tab-curve">
+      <div id="curve-wrap">
+        <canvas id="curve-canvas"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from '/static/three.module.min.js';
+
+// ════════════════════════════════════════════════════════
+// 全局状态
+// ════════════════════════════════════════════════════════
+const S = {
+  trajIndex: null,
+  totalFrames: 0,
+  frameIdx: 0,
+  numCameras: 0,
+  curveData: {},
+  annotations: [],      // [{id,start,end,label}]
+  selAnno: null,        // 选中的标注 id
+  playTimer: null,
+  _playing: false,
+  playFps: 15,
+  annoRange: null,      // 正在拖拽的标注区间 {start,end}
+};
+
+// ════════════════════════════════════════════════════════
+// 工具
+// ════════════════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+async function apiFetch(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(`${r.status} ${url}`);
+  return r.json();
+}
+
+// 竞态保护：每次 refreshFrame 生成唯一序号，过时响应直接丢弃
+let _frameSeq = 0;
+let _frameAbort = null;
+function showLoading(msg) { $('loading-msg').textContent = msg; $('loading').classList.remove('hidden'); }
+function hideLoading() { $('loading').classList.add('hidden'); }
+function stopPlay() {
+  if (S.playTimer) { clearInterval(S.playTimer); S.playTimer = null; }
+  S._playing = false;
+}
+
+// ════════════════════════════════════════════════════════
+// Three.js 场景
+// ════════════════════════════════════════════════════════
+const renderer = new THREE.WebGLRenderer({ canvas: $('three-canvas'), antialias: true, alpha: false });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setClearColor(0x0a0f1a);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 100);
+camera.position.set(1.2, 1.0, -1.5);  // 对应 Plotly eye (1.5, 1.5, 1.2) 变换后
+camera.lookAt(0, 0.3, 0);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+dirLight.position.set(1, 2, 1);
+scene.add(dirLight);
+
+const gridHelper = new THREE.GridHelper(2, 20, 0x374151, 0x1f2937);
+scene.add(gridHelper);
+
+// ── 坐标轴 + 刻度 ──
+// 数据坐标系 → Three.js 坐标系：
+//   数据 +X → three.js +X (红)
+//   数据 +Y → three.js -Z (绿)  ← 深度轴，原蓝轴方向反了就因为这里
+//   数据 +Z → three.js +Y (蓝)  ← 高度轴
+const AXIS_DEF = [
+  { dir: new THREE.Vector3(1, 0,  0), color: 0xf87171, label: 'X' },
+  { dir: new THREE.Vector3(0, 0, -1), color: 0x4ade80, label: 'Y' },
+  { dir: new THREE.Vector3(0, 1,  0), color: 0x60a5fa, label: 'Z' },
+];
+const AXIS_LEN = 0.5, TICK_STEP = 0.1;
+const _axisLabels = [];   // { el, pos3d }
+
+function buildAxes() {
+  const container = document.getElementById('axis-labels');
+  AXIS_DEF.forEach(({ dir, color, label }) => {
+    const mat = new THREE.LineBasicMaterial({ color });
+    // 主轴线
+    scene.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), dir.clone().multiplyScalar(AXIS_LEN)]),
+      mat
+    ));
+    const numTicks = Math.round(AXIS_LEN / TICK_STEP);
+    for (let t = 1; t <= numTicks; t++) {
+      const pos = dir.clone().multiplyScalar(t * TICK_STEP);
+      // 刻度数值标签
+      const el = document.createElement('div');
+      el.className = 'axis-lbl';
+      el.textContent = (t * TICK_STEP).toFixed(1);
+      el.style.color = `#${color.toString(16).padStart(6, '0')}`;
+      el.style.fontSize = '9px';
+      container.appendChild(el);
+      _axisLabels.push({ el, pos3d: pos.clone() });
+    }
+    // 轴名标签（含单位）
+    const nameEl = document.createElement('div');
+    nameEl.className = 'axis-lbl';
+    nameEl.textContent = `${label} (m)`;
+    nameEl.style.color = `#${color.toString(16).padStart(6, '0')}`;
+    nameEl.style.fontWeight = 'bold';
+    nameEl.style.fontSize = '13px';
+    container.appendChild(nameEl);
+    _axisLabels.push({ el: nameEl, pos3d: dir.clone().multiplyScalar(AXIS_LEN + 0.04) });
+  });
+}
+buildAxes();
+
+function updateAxisLabels() {
+  const W = viewport.clientWidth, H = viewport.clientHeight;
+  _axisLabels.forEach(({ el, pos3d }) => {
+    const p = pos3d.clone().project(camera);
+    if (p.z >= 1) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.style.left = ((p.x + 1) / 2 * W) + 'px';
+    el.style.top  = (-(p.y - 1) / 2 * H) + 'px';
+  });
+}
+
+// 预创建场景对象
+function makeMeshObj(color, opacity = 0.75) {
+  const g = new THREE.BufferGeometry();
+  const m = new THREE.MeshPhongMaterial({ color, opacity, transparent: opacity < 1, side: THREE.DoubleSide, shininess: 40 });
+  const o = new THREE.Mesh(g, m);
+  o.visible = false;
+  scene.add(o);
+  return o;
+}
+function makePointsObj(color, size = 0.006) {
+  const g = new THREE.BufferGeometry();
+  const m = new THREE.PointsMaterial({ color, size, sizeAttenuation: true });
+  const o = new THREE.Points(g, m);
+  o.visible = false;
+  scene.add(o);
+  return o;
+}
+
+const OBJ = {
+  manoMesh:   makeMeshObj(0x6ec6f5, 0.78),
+  objectMesh: makeMeshObj(0xffd700, 0.88),
+  manoJoints: makePointsObj(0xff4444, 0.007),
+  urdfJoints: makePointsObj(0xcc88ff, 0.008),
+};
+const urdfMeshObjs = Array.from({ length: 25 }, () => makeMeshObj(0xf5deb3, 0.7));
+
+function setMesh(obj, data) {
+  if (!data) { obj.visible = false; return; }
+  const pos = new Float32Array(data.x.length * 3);
+  for (let i = 0; i < data.x.length; i++) {
+    pos[i*3]   =  data.x[i];   //  X →  X
+    pos[i*3+1] =  data.z[i];   //  Z →  Y（Z-up → Y-up）
+    pos[i*3+2] = -data.y[i];   //  Y → -Z（深度轴翻转）
+  }
+  obj.geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  if (data.i) {
+    const idx = new Uint32Array(data.i.length * 3);
+    for (let f = 0; f < data.i.length; f++) {
+      idx[f*3]=data.i[f]; idx[f*3+1]=data.j[f]; idx[f*3+2]=data.k[f];
+    }
+    obj.geometry.setIndex(new THREE.BufferAttribute(idx, 1));
+  }
+  obj.geometry.computeVertexNormals();
+  obj.geometry.attributes.position.needsUpdate = true;
+  obj.visible = true;
+}
+function setPoints(obj, data) {
+  if (!data) { obj.visible = false; return; }
+  const pos = new Float32Array(data.x.length * 3);
+  for (let i = 0; i < data.x.length; i++) {
+    pos[i*3]   =  data.x[i];
+    pos[i*3+1] =  data.z[i];
+    pos[i*3+2] = -data.y[i];
+  }
+  obj.geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  obj.geometry.attributes.position.needsUpdate = true;
+  obj.visible = true;
+}
+
+// ── 简易 Orbit 控制 ──
+const orbit = (() => {
+  const sph = new THREE.Spherical().setFromVector3(
+    new THREE.Vector3().subVectors(camera.position, new THREE.Vector3(0, 0.3, 0))
+  );
+  const target = new THREE.Vector3(0, 0.3, 0);
+  let mouse = null;
+  const c = $('three-canvas');
+
+  c.addEventListener('contextmenu', e => e.preventDefault());
+  c.addEventListener('mousedown', e => { mouse = { x: e.clientX, y: e.clientY, btn: e.button }; });
+  window.addEventListener('mouseup', () => { mouse = null; });
+  window.addEventListener('mousemove', e => {
+    if (!mouse) return;
+    const dx = e.clientX - mouse.x, dy = e.clientY - mouse.y;
+    mouse.x = e.clientX; mouse.y = e.clientY;
+    if (mouse.btn === 0) {
+      sph.theta -= dx * 0.008; sph.phi -= dy * 0.008;
+      sph.phi = Math.max(0.05, Math.min(Math.PI - 0.05, sph.phi));
+    } else if (mouse.btn === 2) {
+      const right = new THREE.Vector3().crossVectors(camera.getWorldDirection(new THREE.Vector3()), camera.up).normalize();
+      const up = camera.up.clone();
+      const scale = sph.radius * 0.001;
+      target.addScaledVector(right, -dx * scale).addScaledVector(up, dy * scale);
+    }
+    update();
+  });
+  c.addEventListener('wheel', e => {
+    sph.radius = Math.max(0.05, sph.radius * (1 + e.deltaY * 0.001));
+    update();
+  }, { passive: true });
+
+  function update() {
+    camera.position.setFromSpherical(sph).add(target);
+    camera.lookAt(target);
+  }
+  return { update };
+})();
+
+// ── 渲染循环 ──
+const viewport = $('viewport');
+const ro = new ResizeObserver(() => {
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+});
+ro.observe(viewport);
+
+(function renderLoop() {
+  requestAnimationFrame(renderLoop);
+  renderer.render(scene, camera);
+  updateAxisLabels();
+})();
+
+// ════════════════════════════════════════════════════════
+// API 调用
+// ════════════════════════════════════════════════════════
+function apply3D(d) {
+  const hasUrdfMesh = d.urdf_meshes && d.urdf_meshes.length > 0;
+  // URDF mesh 与 MANO mesh 互斥：URDF mesh 存在时隐藏 MANO mesh
+  setMesh(OBJ.manoMesh, hasUrdfMesh ? null : d.mano_mesh);
+  setPoints(OBJ.manoJoints, d.mano_joints);
+  setPoints(OBJ.urdfJoints, d.urdf_joints);
+  setMesh(OBJ.objectMesh, d.object_mesh);
+  if (hasUrdfMesh) {
+    d.urdf_meshes.forEach((m, i) => setMesh(urdfMeshObjs[i], m));
+    for (let i = d.urdf_meshes.length; i < 25; i++) urdfMeshObjs[i].visible = false;
+  } else { urdfMeshObjs.forEach(o => o.visible = false); }
+  gridHelper.visible = $('cb-grid').checked;
+}
+
+async function refreshFrame() {
+  // 取消上一次未完成的请求
+  if (_frameAbort) _frameAbort.abort();
+  _frameAbort = new AbortController();
+  const sig = _frameAbort.signal;
+  const seq = ++_frameSeq;
+
+  $('frame-label').textContent = `帧 ${S.frameIdx} / ${S.totalFrames - 1}`;
+  drawTimeline();
+
+  // 带 signal 的 fetch 包装
+  const fetchWithSig = (url) => fetch(url, { signal: sig }).then(r => {
+    if (!r.ok) throw new Error(`${r.status} ${url}`);
+    return r.json();
+  });
+
+  try {
+    const [d3, dv] = await Promise.all([
+      (async () => {
+        const p = new URLSearchParams({
+          show_mano_mesh:   $('cb-mano-mesh').checked,
+          show_mano_joints: $('cb-mano-joints').checked,
+          show_urdf_joints: $('cb-urdf-joints').checked,
+          show_urdf_mesh:   $('cb-urdf-mesh').checked,
+          show_object:      $('cb-object').checked,
+          show_origin:      false,
+        });
+        return fetchWithSig(`/api/frame/${S.trajIndex}/${S.frameIdx}?${p}`);
+      })(),
+      (async () => {
+        if (S.trajIndex === null || S.numCameras === 0) return null;
+        return fetchWithSig(`/api/video/${S.trajIndex}/${$('cam-select').value || 0}/${S.frameIdx}?stream=${$('stream-select').value}`)
+          .catch(() => null);
+      })(),
+    ]);
+
+    // 如果有更新的请求已经发出，丢弃本次结果
+    if (seq !== _frameSeq) return;
+
+    apply3D(d3);
+    if (dv) {
+      $('video-img').src = dv.data_uri;
+      $('video-img').style.display = 'block';
+      $('video-none').style.display = 'none';
+    } else if (S.numCameras > 0) {
+      $('video-img').style.display = 'none';
+      $('video-none').style.display = '';
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') return;  // 正常取消，忽略
+  }
+  drawCurve();
+}
+
+// ════════════════════════════════════════════════════════
+// 标注时间轴
+// ════════════════════════════════════════════════════════
+const tlCanvas = $('timeline-canvas');
+const tlCtx = tlCanvas.getContext('2d');
+const ANNO_COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#a855f7','#ec4899'];
+let annoColorIdx = 0;
+function nextColor() { return ANNO_COLORS[(annoColorIdx++) % ANNO_COLORS.length]; }
+
+function drawTimeline() {
+  const W = tlCanvas.width, H = tlCanvas.height;
+  tlCtx.clearRect(0, 0, W, H);
+
+  // 背景
+  tlCtx.fillStyle = '#111827';
+  tlCtx.fillRect(0, 0, W, H);
+
+  if (!S.totalFrames) return;
+  const f2x = f => f / S.totalFrames * W;
+
+  // 标注区域
+  S.annotations.forEach(a => {
+    const x1 = f2x(a.start), x2 = f2x(a.end);
+    tlCtx.fillStyle = (a.id === S.selAnno) ? lighten(a.color, 40) : a.color;
+    tlCtx.globalAlpha = 0.55;
+    tlCtx.fillRect(x1, 8, x2 - x1, H - 16);
+    tlCtx.globalAlpha = 1;
+    tlCtx.strokeStyle = a.color;
+    tlCtx.lineWidth = 1.5;
+    tlCtx.strokeRect(x1, 8, x2 - x1, H - 16);
+    // 标签
+    tlCtx.fillStyle = '#fff';
+    tlCtx.font = '11px sans-serif';
+    tlCtx.fillText(a.label, x1 + 3, H / 2 + 4);
+  });
+
+  // 拖拽预览
+  if (S.annoRange) {
+    const x1 = f2x(Math.min(S.annoRange.start, S.annoRange.end));
+    const x2 = f2x(Math.max(S.annoRange.start, S.annoRange.end));
+    tlCtx.fillStyle = 'rgba(255,255,255,0.12)';
+    tlCtx.fillRect(x1, 8, x2 - x1, H - 16);
+    tlCtx.strokeStyle = '#fff';
+    tlCtx.lineWidth = 1;
+    tlCtx.setLineDash([4, 3]);
+    tlCtx.strokeRect(x1, 8, x2 - x1, H - 16);
+    tlCtx.setLineDash([]);
+  }
+
+  // 刻度（每 10 帧一小格）
+  tlCtx.fillStyle = '#374151';
+  const step = Math.max(1, Math.floor(S.totalFrames / 50));
+  for (let f = 0; f <= S.totalFrames; f += step) {
+    const x = f2x(f);
+    tlCtx.fillRect(x, H - 6, 1, 6);
+  }
+
+  // 当前帧线
+  const cx = f2x(S.frameIdx);
+  tlCtx.strokeStyle = '#f87171';
+  tlCtx.lineWidth = 2;
+  tlCtx.beginPath();
+  tlCtx.moveTo(cx, 0); tlCtx.lineTo(cx, H);
+  tlCtx.stroke();
+}
+
+function lighten(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.min(255, (n >> 16) + amt);
+  const g = Math.min(255, ((n >> 8) & 0xff) + amt);
+  const b = Math.min(255, (n & 0xff) + amt);
+  return `#${((r<<16)|(g<<8)|b).toString(16).padStart(6,'0')}`;
+}
+
+// timeline 事件
+let tlDrag = null;
+tlCanvas.addEventListener('mousedown', e => {
+  const x = e.offsetX * (tlCanvas.width / tlCanvas.offsetWidth);
+  const f = Math.round(x / tlCanvas.width * S.totalFrames);
+  // 点击选中已有标注
+  const hit = S.annotations.find(a => f >= a.start && f <= a.end);
+  if (hit) { S.selAnno = hit.id; renderAnnoList(); drawTimeline(); return; }
+  S.selAnno = null;
+  tlDrag = { start: f };
+  S.annoRange = { start: f, end: f };
+});
+tlCanvas.addEventListener('mousemove', e => {
+  const x = e.offsetX * (tlCanvas.width / tlCanvas.offsetWidth);
+  const f = Math.round(x / tlCanvas.width * S.totalFrames);
+  if (tlDrag) {
+    S.annoRange = { start: tlDrag.start, end: f };
+    drawTimeline(); return;
+  }
+  // 拖拽帧
+  if (e.buttons === 1 && !tlDrag) {
+    S.frameIdx = Math.max(0, Math.min(S.totalFrames - 1, f));
+    $('frame-slider').value = S.frameIdx;
+    refreshFrame();
+  }
+});
+tlCanvas.addEventListener('mouseup', e => {
+  if (!tlDrag) return;
+  const x = e.offsetX * (tlCanvas.width / tlCanvas.offsetWidth);
+  const f = Math.round(x / tlCanvas.width * S.totalFrames);
+  const start = Math.min(tlDrag.start, f), end = Math.max(tlDrag.start, f);
+  if (end - start >= 2) {
+    // 若没有正在拖拽，则点击即跳帧
+  } else {
+    S.frameIdx = Math.max(0, Math.min(S.totalFrames - 1, start));
+    $('frame-slider').value = S.frameIdx;
+    refreshFrame();
+  }
+  tlDrag = null; S.annoRange = null;
+  drawTimeline();
+});
+
+// 添加标注
+$('btn-anno-add').onclick = () => {
+  if (!S.totalFrames) return;
+  const label = $('anno-label-input').value.trim() || '标注';
+  // 默认以当前帧为中心创建一个范围
+  const half = Math.max(1, Math.floor(S.totalFrames * 0.05));
+  const start = Math.max(0, S.frameIdx - half);
+  const end = Math.min(S.totalFrames - 1, S.frameIdx + half);
+  S.annotations.push({ id: crypto.randomUUID(), start, end, label, color: nextColor() });
+  renderAnnoList(); drawTimeline();
+};
+
+$('btn-anno-del').onclick = () => {
+  if (!S.selAnno) return;
+  S.annotations = S.annotations.filter(a => a.id !== S.selAnno);
+  S.selAnno = null; renderAnnoList(); drawTimeline();
+};
+
+$('btn-anno-save').onclick = async () => {
+  if (S.trajIndex === null) return;
+  try {
+    await apiFetch(`/api/annotations/${S.trajIndex}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trajectory_index: S.trajIndex, annotations: S.annotations }),
+    });
+    $('btn-anno-save').textContent = '✓ 已保存';
+    setTimeout(() => { $('btn-anno-save').textContent = '💾 保存'; }, 1500);
+  } catch (e) { alert('保存失败: ' + e.message); }
+};
+
+function renderAnnoList() {
+  const list = $('anno-list');
+  list.innerHTML = '';
+  S.annotations.forEach(a => {
+    const tag = document.createElement('div');
+    tag.className = 'anno-tag' + (a.id === S.selAnno ? ' selected' : '');
+    tag.style.borderLeftColor = a.color;
+    tag.style.borderLeftWidth = '3px';
+    tag.style.borderLeftStyle = 'solid';
+    tag.textContent = `${a.label} [${a.start}–${a.end}]`;
+    tag.onclick = () => { S.selAnno = a.id; renderAnnoList(); drawTimeline(); };
+    list.appendChild(tag);
+  });
+}
+
+// timeline canvas 尺寸
+const tlRo = new ResizeObserver(() => {
+  tlCanvas.width = tlCanvas.offsetWidth;
+  tlCanvas.height = tlCanvas.offsetHeight;
+  drawTimeline();
+});
+tlRo.observe(tlCanvas);
+
+// ════════════════════════════════════════════════════════
+// 曲线图
+// ════════════════════════════════════════════════════════
+const CURVE_COLORS = ['#60a5fa','#34d399','#f87171','#fbbf24','#a78bfa','#fb923c','#38bdf8'];
+function drawCurve() {
+  const cvs = $('curve-canvas');
+  const ctx = cvs.getContext('2d');
+  const W = cvs.width, H = cvs.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0a0f1a'; ctx.fillRect(0, 0, W, H);
+
+  const selected = Array.from($('curve-select').selectedOptions).map(o => o.value);
+  if (!selected.length || !S.totalFrames) return;
+
+  const datasets = selected.map(name => S.curveData[name]).filter(Boolean);
+  if (!datasets.length) return;
+
+  const allVals = datasets.flat();
+  const minV = Math.min(...allVals), maxV = Math.max(...allVals);
+  const range = maxV - minV || 1;
+
+  const pad = { l: 42, r: 10, t: 6, b: 20 };
+  const iW = W - pad.l - pad.r, iH = H - pad.t - pad.b;
+
+  const f2x = f => pad.l + f / (S.totalFrames - 1) * iW;
+  const v2y = v => pad.t + iH - (v - minV) / range * iH;
+
+  // 网格
+  ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + iH * i / 4;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + iW, y); ctx.stroke();
+    const val = maxV - range * i / 4;
+    ctx.fillStyle = '#6b7280'; ctx.font = '10px sans-serif';
+    ctx.fillText(val.toFixed(3), 0, y + 3);
+  }
+
+  // 曲线
+  datasets.forEach((data, ci) => {
+    ctx.strokeStyle = CURVE_COLORS[ci % CURVE_COLORS.length];
+    ctx.lineWidth = 1.5; ctx.beginPath();
+    data.forEach((v, f) => {
+      const x = f2x(f), y = v2y(v);
+      f === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+
+  // 当前帧线
+  const cx = f2x(S.frameIdx);
+  ctx.strokeStyle = '#f87171'; ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath(); ctx.moveTo(cx, pad.t); ctx.lineTo(cx, pad.t + iH); ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+const cvRo = new ResizeObserver(() => {
+  const c = $('curve-canvas');
+  c.width = c.offsetWidth; c.height = c.offsetHeight;
+  drawCurve();
+});
+cvRo.observe($('curve-canvas'));
+
+// ════════════════════════════════════════════════════════
+// Tab 切换
+// ════════════════════════════════════════════════════════
+window.switchTab = name => {
+  ['anno','curve'].forEach(t => {
+    $(`tab-${t}`).style.display = t === name ? 'block' : 'none';
+    $(`tab-btn-${t}`).classList.toggle('active', t === name);
+  });
+  if (name === 'curve') {
+    const c = $('curve-canvas');
+    c.width = c.offsetWidth; c.height = c.offsetHeight;
+    drawCurve();
+  }
+};
+
+// ════════════════════════════════════════════════════════
+// 加载轨迹
+// ════════════════════════════════════════════════════════
+async function loadTrajectory(index) {
+  stopPlay();
+  showLoading(`加载轨迹 ${index}…`);
+  try {
+    const info = await apiFetch(`/api/trajectory/${index}/load`);
+    S.trajIndex = index;
+    S.totalFrames = info.total_frames;
+    S.frameIdx = 0;
+    S.numCameras = info.num_cameras;
+    S.curveData = {};
+    S.annotations = [];
+    S.selAnno = null;
+
+    $('traj-info').textContent = `${info.scene}  ·  ${info.operator}  ·  ${info.total_frames} 帧`;
+    $('frame-slider').max = info.total_frames - 1;
+    $('frame-slider').value = 0;
+
+    // 摄像头
+    $('cam-select').innerHTML = '';
+    for (let i = 0; i < info.num_cameras; i++) {
+      const o = document.createElement('option');
+      o.value = i; o.textContent = `相机 ${i}`; $('cam-select').appendChild(o);
+    }
+
+    // 曲线选项
+    const opts = info.curve_options || [];
+    $('curve-select').innerHTML = '';
+    const defaults = ['mano.global_pos.x','mano.global_pos.y','mano.global_pos.z'];
+    opts.forEach(name => {
+      const o = document.createElement('option');
+      o.value = name; o.textContent = name;
+      if (defaults.includes(name)) o.selected = true;
+      $('curve-select').appendChild(o);
+    });
+
+    // 预取曲线数据
+    showLoading('预取曲线数据…');
+    await Promise.all(opts.map(async name => {
+      try {
+        const r = await apiFetch(`/api/curve/${index}/${encodeURIComponent(name)}`);
+        S.curveData[name] = r.data;
+      } catch {}
+    }));
+
+    // 加载已有标注
+    try {
+      const saved = await apiFetch(`/api/annotations/${index}`);
+      S.annotations = saved.annotations || [];
+      annoColorIdx = S.annotations.length;
+    } catch {}
+
+    renderAnnoList();
+    await refreshFrame();
+  } finally {
+    hideLoading();
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// 事件绑定
+// ════════════════════════════════════════════════════════
+$('frame-slider').oninput = async () => {
+  stopPlay();
+  S.frameIdx = parseInt($('frame-slider').value);
+  await refreshFrame();
+};
+
+$('traj-select').onchange = () => loadTrajectory(parseInt($('traj-select').value));
+
+['cam-select','stream-select'].forEach(id => $(id).onchange = refreshFrame);
+
+['cb-mano-mesh','cb-mano-joints','cb-urdf-joints','cb-urdf-mesh','cb-object','cb-grid']
+  .forEach(id => $(id).onchange = refreshFrame);
+
+$('curve-select').onchange = drawCurve;
+
+$('btn-play').onclick = () => {
+  stopPlay();
+  S._playing = true;
+  const interval = 1000 / S.playFps;
+  async function step() {
+    if (!S._playing) return;
+    if (S.frameIdx >= S.totalFrames - 1) { stopPlay(); $('btn-play').textContent = '▶ 播放'; return; }
+    const t0 = Date.now();
+    S.frameIdx++;
+    $('frame-slider').value = S.frameIdx;
+    await refreshFrame();
+    if (!S._playing) return;
+    const elapsed = Date.now() - t0;
+    S.playTimer = setTimeout(step, Math.max(0, interval - elapsed));
+  }
+  $('btn-play').textContent = '⏸ 播放中';
+  step();
+};
+$('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ 播放'; };
+
+// ════════════════════════════════════════════════════════
+// 启动
+// ════════════════════════════════════════════════════════
+(async () => {
+  try {
+    showLoading('加载轨迹列表…');
+    const trajs = await apiFetch('/api/trajectories');
+    $('traj-select').innerHTML = '';
+    trajs.forEach(({ label, index }) => {
+      const o = document.createElement('option');
+      o.value = index; o.textContent = label; $('traj-select').appendChild(o);
+    });
+    if (trajs.length) await loadTrajectory(trajs[0].index);
+    else hideLoading();
+  } catch (e) { $('loading-msg').textContent = `错误: ${e.message}`; }
+})();
+</script>
+</body>
+</html>

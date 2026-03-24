@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  lance-viz-api:
+    build:
+      context: ..          # 项目根目录，使 Dockerfile 能 COPY app.py 和 core/
+      dockerfile: deploy/Dockerfile
+    image: lance-viz-api:latest
+    container_name: lance-viz-api
+    ports:
+      - "8868:8868"
+    volumes:
+      # 源代码热挂载（开发时修改无需重新 build）
+      - ../app.py:/app/app.py:ro
+      - ../core:/app/core:ro
+      - ../frontend:/app/frontend:ro
+      # 标注数据目录（可读写，持久化到宿主机）
+      - ../annotations:/data/annotations
+      # 数据挂载
+      - /home/czk/projects/lance_viz_new:/data:ro
+      - /mnt/nas-222-project:/mnt/nas-222-project:ro
+      - /mnt/nas-222-project:/mnt/nas-222:ro
+    restart: unless-stopped
+    command: >
+      uvicorn app:app
+      --host 0.0.0.0
+      --port 8868
+      --reload
+    environment:
+      - TZ=Asia/Shanghai
