@@ -3,6 +3,7 @@ Lance 可视化 FastAPI 服务
 
 启动：uvicorn app:app --host 0.0.0.0 --port 8868
 """
+import os
 from pathlib import Path
 
 import json
@@ -194,7 +195,7 @@ def get_curve(index: int, curve_name: str):
 # 时间轴标注
 # ---------------------------------------------------------------------------
 
-_ANNO_DIR = Path("/data/annotations")
+_ANNO_DIR = Path(os.environ.get("ANNOTATIONS_DIR", "/app/annotations"))
 
 
 class Annotation(BaseModel):

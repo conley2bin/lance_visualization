@@ -214,7 +214,7 @@ select.small { width: 100%; background: #374151; color: #e0e0e0; border: 1px sol
 </div>
 
 <script type="module">
-import * as THREE from '/static/three.module.min.js';
+import * as THREE from './static/three.module.min.js';
 
 // ════════════════════════════════════════════════════════
 // 全局状态
@@ -489,11 +489,11 @@ async function refreshFrame() {
           show_object:      $('cb-object').checked,
           show_origin:      false,
         });
-        return fetchWithSig(`/api/frame/${S.trajIndex}/${S.frameIdx}?${p}`);
+        return fetchWithSig(`./api/frame/${S.trajIndex}/${S.frameIdx}?${p}`);
       })(),
       (async () => {
         if (S.trajIndex === null || S.numCameras === 0) return null;
-        return fetchWithSig(`/api/video/${S.trajIndex}/${$('cam-select').value || 0}/${S.frameIdx}?stream=${$('stream-select').value}`)
+        return fetchWithSig(`./api/video/${S.trajIndex}/${$('cam-select').value || 0}/${S.frameIdx}?stream=${$('stream-select').value}`)
           .catch(() => null);
       })(),
     ]);
@@ -653,7 +653,7 @@ $('btn-anno-del').onclick = () => {
 $('btn-anno-save').onclick = async () => {
   if (S.trajIndex === null) return;
   try {
-    await apiFetch(`/api/annotations/${S.trajIndex}`, {
+    await apiFetch(`./api/annotations/${S.trajIndex}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ trajectory_index: S.trajIndex, annotations: S.annotations }),
@@ -771,7 +771,7 @@ async function loadTrajectory(index) {
   stopPlay();
   showLoading(`加载轨迹 ${index}…`);
   try {
-    const info = await apiFetch(`/api/trajectory/${index}/load`);
+    const info = await apiFetch(`./api/trajectory/${index}/load`);
     S.trajIndex = index;
     S.totalFrames = info.total_frames;
     S.frameIdx = 0;
@@ -806,14 +806,14 @@ async function loadTrajectory(index) {
     showLoading('预取曲线数据…');
     await Promise.all(opts.map(async name => {
       try {
-        const r = await apiFetch(`/api/curve/${index}/${encodeURIComponent(name)}`);
+        const r = await apiFetch(`./api/curve/${index}/${encodeURIComponent(name)}`);
         S.curveData[name] = r.data;
       } catch {}
     }));
 
     // 加载已有标注
     try {
-      const saved = await apiFetch(`/api/annotations/${index}`);
+      const saved = await apiFetch(`./api/annotations/${index}`);
       S.annotations = saved.annotations || [];
       annoColorIdx = S.annotations.length;
     } catch {}
@@ -869,7 +869,7 @@ $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ �
 (async () => {
   try {
     showLoading('加载轨迹列表…');
-    const trajs = await apiFetch('/api/trajectories');
+    const trajs = await apiFetch('./api/trajectories');
     $('traj-select').innerHTML = '';
     trajs.forEach(({ label, index }) => {
       const o = document.createElement('option');

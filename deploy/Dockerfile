@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # ============================================
 # Lance 可视化 FastAPI 服务镜像
 # ============================================
@@ -47,7 +46,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY app.py .
 COPY core ./core
 
-RUN mkdir -p /data
+RUN mkdir -p /data/annotations
 
 EXPOSE 8868
 

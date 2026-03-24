@@ -1,30 +1,34 @@
-version: '3.8'
-
 services:
   lance-viz-api:
     build:
-      context: ..          # 项目根目录，使 Dockerfile 能 COPY app.py 和 core/
+      context: ..
       dockerfile: deploy/Dockerfile
     image: lance-viz-api:latest
     container_name: lance-viz-api
+    env_file:
+      - .env
     ports:
-      - "8868:8868"
+      - "${APP_PORT:-8868}:${APP_PORT:-8868}"
     volumes:
       # 源代码热挂载（开发时修改无需重新 build）
       - ../app.py:/app/app.py:ro
       - ../core:/app/core:ro
       - ../frontend:/app/frontend:ro
       # 标注数据目录（可读写，持久化到宿主机）
-      - ../annotations:/data/annotations
+      - ${HOST_ANNOTATIONS_PATH:-../annotations}:/app/annotations
       # 数据挂载
-      - /home/czk/projects/lance_viz_new:/data:ro
-      - /mnt/nas-222-project:/mnt/nas-222-project:ro
-      - /mnt/nas-222-project:/mnt/nas-222:ro
+      - ${HOST_ASSETS_PATH:-../assets}:/app/assets:ro
+      - ${HOST_DATA_PATH}:/data:ro
+      - ${HOST_NAS_PATH}:/mnt/nas-222-project:ro
+      - ${HOST_NAS_PATH}:/mnt/nas-222:ro
     restart: unless-stopped
     command: >
       uvicorn app:app
       --host 0.0.0.0
-      --port 8868
+      --port ${APP_PORT:-8868}
       --reload
     environment:
-      - TZ=Asia/Shanghai
+      - TZ=${TZ:-Asia/Shanghai}
+      - LANCE_DATASET=${LANCE_DATASET}
+      - MANO_MODEL_PATH=${MANO_MODEL_PATH}
+      - ANNOTATIONS_DIR=${ANNOTATIONS_DIR:-/app/annotations}
