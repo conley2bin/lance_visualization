@@ -20,6 +20,19 @@ body {
 #traj-select { flex: 1; max-width: 480px; background: #374151; color: #e0e0e0; border: 1px solid #4b5563; border-radius: 4px; padding: 4px 8px; }
 #traj-info { color: #9ca3af; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ── 轨迹搜索 ── */
+#traj-search-wrap { position: relative; flex: 1; max-width: 480px; }
+#traj-search { width: 100%; background: #374151; color: #e0e0e0; border: 1px solid #4b5563; border-radius: 4px; padding: 4px 8px; outline: none; }
+#traj-search:focus { border-color: #f87171; }
+#traj-dropdown {
+  display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 999;
+  background: #1f2937; border: 1px solid #4b5563; border-radius: 4px;
+  max-height: 260px; overflow-y: auto; margin-top: 2px;
+}
+#traj-dropdown.open { display: block; }
+.traj-item { padding: 5px 8px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.traj-item:hover, .traj-item.active { background: #374151; color: #f87171; }
+
 /* ── 主体 ── */
 #main {
   flex: 1; display: grid;
@@ -130,7 +143,10 @@ select.small { width: 100%; background: #374151; color: #e0e0e0; border: 1px sol
 
 <div id="topbar">
   <h1>Lance 可视化</h1>
-  <select id="traj-select"><option>加载中…</option></select>
+  <div id="traj-search-wrap">
+    <input id="traj-search" type="text" placeholder="搜索轨迹…" autocomplete="off">
+    <div id="traj-dropdown"></div>
+  </div>
   <span id="traj-info"></span>
 </div>
 
@@ -834,7 +850,49 @@ $('frame-slider').oninput = async () => {
   await refreshFrame();
 };
 
-$('traj-select').onchange = () => loadTrajectory(parseInt($('traj-select').value));
+// ── 轨迹搜索下拉 ──
+let _allTrajs = [];   // 全量数据，仅存 JS 数组，不创建 DOM
+const SHOW_MAX = Infinity;
+
+function renderDropdown(keyword) {
+  const kw = keyword.trim().toLowerCase();
+  const matched = kw
+    ? _allTrajs.filter(t => t.label.toLowerCase().includes(kw))
+    : _allTrajs;
+  const items = matched.slice(0, SHOW_MAX);
+  const dd = $('traj-dropdown');
+  dd.innerHTML = '';
+  if (!items.length) {
+    dd.innerHTML = '<div class="traj-item" style="color:#6b7280">无匹配结果</div>';
+  } else {
+    items.forEach(({ label, index }) => {
+      const el = document.createElement('div');
+      el.className = 'traj-item';
+      el.textContent = label;
+      if (index === S.trajIndex) el.classList.add('active');
+      el.onclick = () => {
+        $('traj-search').value = label;
+        dd.classList.remove('open');
+        loadTrajectory(index);
+      };
+      dd.appendChild(el);
+    });
+    if (matched.length > SHOW_MAX) {
+      const hint = document.createElement('div');
+      hint.className = 'traj-item';
+      hint.style.color = '#6b7280';
+      hint.textContent = `…还有 ${matched.length - SHOW_MAX} 条，请继续输入筛选`;
+      dd.appendChild(hint);
+    }
+  }
+  dd.classList.add('open');
+}
+
+$('traj-search').addEventListener('input', e => renderDropdown(e.target.value));
+$('traj-search').addEventListener('focus', e => renderDropdown(e.target.value));
+document.addEventListener('click', e => {
+  if (!$('traj-search-wrap').contains(e.target)) $('traj-dropdown').classList.remove('open');
+});
 
 ['cam-select','stream-select'].forEach(id => $(id).onchange = refreshFrame);
 
@@ -870,13 +928,11 @@ $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ �
   try {
     showLoading('加载轨迹列表…');
     const trajs = await apiFetch('./api/trajectories');
-    $('traj-select').innerHTML = '';
-    trajs.forEach(({ label, index }) => {
-      const o = document.createElement('option');
-      o.value = index; o.textContent = label; $('traj-select').appendChild(o);
-    });
-    if (trajs.length) await loadTrajectory(trajs[0].index);
-    else hideLoading();
+    _allTrajs = trajs;
+    if (trajs.length) {
+      $('traj-search').value = trajs[0].label;
+      await loadTrajectory(trajs[0].index);
+    } else hideLoading();
   } catch (e) { $('loading-msg').textContent = `错误: ${e.message}`; }
 })();
 </script>

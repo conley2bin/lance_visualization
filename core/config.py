@@ -55,16 +55,32 @@ def _default_config() -> dict:
             ),
             "urdf": "",
             "object_mesh": "",
+            "annotations_dir": os.environ.get("ANNOTATIONS_DIR", "/app/annotations"),
+            "project_root": os.environ.get("PROJECT_ROOT", "/app"),
         },
         "defaults": {
             "trajectory_index": 0,
             "camera_index": 0,
             "video_stream": "color",
             "playback_fps": 15,
+            "hand": "right",
         },
     }
 
 
-def get_project_root() -> Path:
-    """返回 assets 等资源的根目录。可通过 PROJECT_ROOT 环境变量覆盖。"""
-    return Path(os.environ.get("PROJECT_ROOT", "/app"))
+def get_annotations_dir(config: dict) -> Path:
+    """返回标注文件保存目录，优先读取配置文件，其次环境变量。"""
+    val = os.environ.get("ANNOTATIONS_DIR")
+    if val:
+        return Path(val)
+    return Path(config.get("paths", {}).get("annotations_dir", "/app/annotations"))
+
+
+def get_project_root(config: dict = None) -> Path:
+    """返回 assets 等资源的根目录，优先读取环境变量，其次配置文件。"""
+    val = os.environ.get("PROJECT_ROOT")
+    if val:
+        return Path(val)
+    if config:
+        return Path(config.get("paths", {}).get("project_root", "/app"))
+    return Path("/app")

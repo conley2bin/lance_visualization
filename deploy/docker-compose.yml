@@ -14,9 +14,11 @@ services:
       - ../app.py:/app/app.py:ro
       - ../core:/app/core:ro
       - ../frontend:/app/frontend:ro
+      # 应用配置（挂载到 config.py 首选查找路径）
+      - ../viz_config.yaml:/data/viz_config.yaml:ro
       # 标注数据目录（可读写，持久化到宿主机）
       - ${HOST_ANNOTATIONS_PATH:-../annotations}:/app/annotations
-      # 数据挂载
+      # 资源与数据挂载
       - ${HOST_ASSETS_PATH:-../assets}:/app/assets:ro
       - ${HOST_DATA_PATH}:/data:ro
       - ${HOST_NAS_PATH}:/mnt/nas-222-project:ro
@@ -29,6 +31,3 @@ services:
       --reload
     environment:
       - TZ=${TZ:-Asia/Shanghai}
-      - LANCE_DATASET=${LANCE_DATASET}
-      - MANO_MODEL_PATH=${MANO_MODEL_PATH}
-      - ANNOTATIONS_DIR=${ANNOTATIONS_DIR:-/app/annotations}

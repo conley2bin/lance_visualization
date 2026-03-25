@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from core.config import get_project_root, load_config
+from core.config import get_annotations_dir, get_project_root, load_config
 from core.curves import get_curve_data, get_curve_options
 from core.data_loader import OptimizedLanceLoader
 from core.video import decode_video_frame, frame_to_base64
@@ -54,9 +54,10 @@ _state_cache: dict[int, TrajectoryState] = {}   # trajectory_index → Trajector
 
 @app.on_event("startup")
 def startup():
-    global _config, _loader, _project_root
+    global _config, _loader, _project_root, _ANNO_DIR
     _config = load_config()
-    _project_root = get_project_root()
+    _project_root = get_project_root(_config)
+    _ANNO_DIR = get_annotations_dir(_config)
     lance_path = _config["paths"]["lance_dataset"]
     print(f"[startup] 加载 Lance 数据集: {lance_path}")
     _loader = OptimizedLanceLoader(lance_path)
@@ -195,7 +196,7 @@ def get_curve(index: int, curve_name: str):
 # 时间轴标注
 # ---------------------------------------------------------------------------
 
-_ANNO_DIR = Path(os.environ.get("ANNOTATIONS_DIR", "/app/annotations"))
+_ANNO_DIR: Path = Path("/app/annotations")  # 启动时由 startup() 覆盖
 
 
 class Annotation(BaseModel):
