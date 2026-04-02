@@ -65,8 +65,10 @@ class TrajectoryState:
         self.object_mesh: dict | None = None
         object_name = lance_row["trajectory_metadata"]["object_names"][0]
         for obj_path in [
-            project_root / f"assets/objects/{object_name}.stl",
+            project_root / f"assets/objects/{object_name}/{object_name}_aligned.stl",
+            project_root / f"assets/objects/{object_name}_aligned.stl",
             project_root / f"assets/objects/{object_name}/{object_name}.stl",
+            project_root / f"assets/objects/{object_name}.stl",
         ]:
             if obj_path.exists():
                 try:
