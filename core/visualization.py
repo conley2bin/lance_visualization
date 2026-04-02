@@ -64,15 +64,29 @@ class TrajectoryState:
         self.obj_rot_aa = np.array(objects["rot_aa"], dtype=np.float32)
         self.object_mesh: dict | None = None
         object_name = lance_row["trajectory_metadata"]["object_names"][0]
-        for obj_path in [
-            project_root / f"assets/objects/{object_name}/{object_name}_aligned.stl",
-            project_root / f"assets/objects/{object_name}_aligned.stl",
-            project_root / f"assets/objects/{object_name}/{object_name}.stl",
-            project_root / f"assets/objects/{object_name}.stl",
-        ]:
+        # 用 assets/objects 中的目录名做前缀匹配，兼容 cuboid2H → cuboid2 等变体
+        objects_dir = project_root / "assets/objects"
+        known = sorted([d.name for d in objects_dir.iterdir() if d.is_dir()], key=len, reverse=True)
+        matched = next((n for n in known if object_name.startswith(n)), None) or object_name
+        obj_paths = [
+            objects_dir / matched / f"{matched}_aligned.stl",
+            objects_dir / f"{matched}_aligned.stl",
+            objects_dir / matched / f"{matched}.stl",
+            objects_dir / f"{matched}.stl",
+        ]
+        for obj_path in obj_paths:
             if obj_path.exists():
                 try:
                     mesh = trimesh.load(str(obj_path))
+                    # 若加载的是 _aligned 版本，但原始 STL 是轴对齐的（cube/cuboid 类），
+                    # 则改用原始版本——旋转数据是基于轴对齐姿态定义的
+                    if "_aligned" in obj_path.name:
+                        orig_path = objects_dir / matched / f"{matched}.stl"
+                        if orig_path.exists():
+                            orig = trimesh.load(str(orig_path))
+                            unique_normals = np.unique(np.round(np.array(orig.face_normals), 1), axis=0)
+                            if all(sum(abs(n) > 0.9 for n in row) == 1 for row in unique_normals):
+                                mesh = orig
                     mesh.vertices = mesh.vertices * 0.001  # mm → m
                     self.object_mesh = {
                         "vertices": np.asarray(mesh.vertices, dtype=np.float32),
