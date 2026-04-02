@@ -182,16 +182,9 @@ def get_frame_data(
 
     # Object mesh
     if show_object and state.object_mesh:
-        rot = Rotation.from_rotvec(state.obj_rot_aa[frame_idx])
-        vertices = rot.apply(state.object_mesh["vertices"]) + state.obj_pos[frame_idx]
-        faces = state.object_mesh["faces"]
-        result["object_mesh"] = {
-            "x": vertices[:, 0].tolist(),
-            "y": vertices[:, 1].tolist(),
-            "z": vertices[:, 2].tolist(),
-            "i": faces[:, 0].tolist(),
-            "j": faces[:, 1].tolist(),
-            "k": faces[:, 2].tolist(),
+        result["object_transform"] = {
+            "position": state.obj_pos[frame_idx].tolist(),
+            "rotation": state.obj_rot_aa[frame_idx].tolist(),
         }
 
     return result

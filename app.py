@@ -5,6 +5,7 @@ Lance 可视化 FastAPI 服务
 """
 import os
 from pathlib import Path
+from collections import OrderedDict
 
 import json
 
@@ -49,7 +50,8 @@ def index():
 _config: dict = {}
 _loader: OptimizedLanceLoader | None = None
 _project_root: Path = Path("/data")
-_state_cache: dict[int, TrajectoryState] = {}   # trajectory_index → TrajectoryState
+_state_cache: OrderedDict[int, TrajectoryState] = OrderedDict()  # LRU缓存
+_MAX_CACHE_SIZE = 10  # 最多缓存10个轨迹状态
 
 
 @app.on_event("startup")
@@ -65,20 +67,43 @@ def startup():
 
 
 def _get_state(index: int) -> TrajectoryState:
-    """获取（或构建）指定轨迹的 TrajectoryState，带缓存。"""
-    if index not in _state_cache:
-        lance_row = _loader.load_trajectory_data(index)
-        if lance_row is None:
-            raise HTTPException(status_code=404, detail=f"轨迹 {index} 加载失败")
-        mano_model_path = _config["paths"]["mano_model"]
-        hand = _config.get("defaults", {}).get("hand", "right")
-        _state_cache[index] = TrajectoryState(
-            lance_row=lance_row,
-            mano_model_path=mano_model_path,
-            hand=hand,
-            project_root=_project_root,
-        )
-    return _state_cache[index]
+    """获取（或构建）指定轨迹的 TrajectoryState，带LRU缓存。"""
+    if index in _state_cache:
+        # 移到末尾表示最近使用
+        _state_cache.move_to_end(index)
+        return _state_cache[index]
+
+    # 加载新轨迹
+    import time
+    t0 = time.time()
+    print(f"[cache] 开始加载轨迹 {index}")
+    lance_row = _loader.load_trajectory_data(index)
+    if lance_row is None:
+        raise HTTPException(status_code=404, detail=f"轨迹 {index} 加载失败")
+    t1 = time.time()
+    print(f"[cache] lance_row 加载完成 {index}，耗时 {t1-t0:.2f}s")
+    mano_model_path = _config["paths"]["mano_model"]
+    hand = _config.get("defaults", {}).get("hand", "right")
+    print(f"[cache] 开始构建 TrajectoryState {index}")
+    state = TrajectoryState(
+        lance_row=lance_row,
+        mano_model_path=mano_model_path,
+        hand=hand,
+        project_root=_project_root,
+    )
+    t2 = time.time()
+    print(f"[cache] TrajectoryState 构建完成 {index}，耗时 {t2-t1:.2f}s，总耗时 {t2-t0:.2f}s")
+
+    # 添加到缓存
+    _state_cache[index] = state
+
+    # 超过限制则删除最旧的
+    if len(_state_cache) > _MAX_CACHE_SIZE:
+        oldest = next(iter(_state_cache))
+        del _state_cache[oldest]
+        print(f"[cache] 清理轨迹 {oldest}，当前缓存: {len(_state_cache)}")
+
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +113,9 @@ def _get_state(index: int) -> TrajectoryState:
 @app.get("/api/trajectories")
 def list_trajectories():
     """返回所有轨迹的列表，格式 [{label, index}, ...]。"""
+    print("[API] /api/trajectories 开始")
     options = _loader.create_trajectory_options()
+    print(f"[API] /api/trajectories 完成，返回 {len(options)} 条")
     return [{"label": label, "index": idx} for label, idx in options]
 
 
@@ -107,18 +134,27 @@ def load_trajectory(index: int):
     预加载轨迹（构建 TrajectoryState）并返回基本信息。
     前端切换轨迹时调用，服务端会缓存计算结果。
     """
+    print(f"[API] /api/trajectory/{index}/load 开始")
     if index < 0 or index >= _loader.total_rows:
         raise HTTPException(status_code=404, detail="轨迹索引超出范围")
+    print(f"[API] 开始获取 state {index}")
     state = _get_state(index)
+    print(f"[API] state {index} 获取完成")
     info = _loader.get_trajectory_info(index)
-    return {
+    print(f"[API] 开始获取 video blobs {index}")
+    video_info = _loader.get_video_blobs(index)
+    print(f"[API] 开始获取 curve options {index}")
+    curve_opts = get_curve_options(state)
+    result = {
         **info,
         "total_frames": state.T,
-        "num_cameras": _loader.get_video_blobs(index)["num_cameras"],
+        "num_cameras": video_info["num_cameras"],
         "has_urdf": state.urdf_helper is not None,
         "has_object_mesh": state.object_mesh is not None,
-        "curve_options": get_curve_options(state),
+        "curve_options": curve_opts,
     }
+    print(f"[API] /api/trajectory/{index}/load 完成，返回数据大小: {len(str(result))} 字节")
+    return result
 
 
 @app.get("/api/frame/{index}/{frame_idx}")
@@ -144,6 +180,22 @@ def get_frame(
         show_object=show_object,
         show_origin=show_origin,
     )
+
+
+@app.get("/api/object_mesh/{index}")
+def get_object_mesh(index: int):
+    """返回物体网格（只需加载一次）。"""
+    state = _get_state(index)
+    if state.object_mesh is None:
+        return None
+    return {
+        "x": state.object_mesh["vertices"][:, 0].tolist(),
+        "y": state.object_mesh["vertices"][:, 1].tolist(),
+        "z": state.object_mesh["vertices"][:, 2].tolist(),
+        "i": state.object_mesh["faces"][:, 0].tolist(),
+        "j": state.object_mesh["faces"][:, 1].tolist(),
+        "k": state.object_mesh["faces"][:, 2].tolist(),
+    }
 
 
 @app.get("/api/video_debug/{index}")
@@ -180,6 +232,25 @@ def get_curves(index: int):
     """返回指定轨迹所有曲线选项名称。"""
     state = _get_state(index)
     return get_curve_options(state)
+
+
+@app.get("/api/curves/{index}/all")
+def get_all_curves(index: int):
+    """返回指定轨迹的所有曲线数据（批量）。"""
+    import time
+    t0 = time.time()
+    print(f"[API] /api/curves/{index}/all 开始")
+    state = _get_state(index)
+    t1 = time.time()
+    curve_names = get_curve_options(state)
+    result = {}
+    for name in curve_names:
+        data = get_curve_data(state, name)
+        if data is not None:
+            result[name] = data
+    t2 = time.time()
+    print(f"[API] /api/curves/{index}/all 完成，返回 {len(result)} 条曲线，get_state耗时 {t1-t0:.2f}s，计算曲线耗时 {t2-t1:.2f}s，总耗时 {t2-t0:.2f}s")
+    return result
 
 
 @app.get("/api/curve/{index}/{curve_name:path}")

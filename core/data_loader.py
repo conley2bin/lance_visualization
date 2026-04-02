@@ -1,4 +1,5 @@
 import lance
+from collections import OrderedDict
 
 
 class OptimizedLanceLoader:
@@ -8,7 +9,8 @@ class OptimizedLanceLoader:
         self.dataset = lance.dataset(lance_path)
         self.total_rows = self.dataset.count_rows()
         self._metadata_cache: dict = {}
-        self._video_cache: dict = {}
+        self._video_cache: OrderedDict = OrderedDict()
+        self._max_video_cache = 3  # 最多缓存3个轨迹的视频
 
     def get_trajectory_info(self, index: int) -> dict:
         """获取指定轨迹的轻量信息（只加载 index + trajectory_metadata 列）。"""
@@ -35,26 +37,40 @@ class OptimizedLanceLoader:
         return self._metadata_cache[index]
 
     def load_trajectory_data(self, index: int) -> dict | None:
-        """加载完整轨迹数据（所有列）。"""
+        """加载轨迹数据（排除视频列以节省内存）。"""
         try:
-            row = self.dataset.take([index])
+            # 排除video和video_depth列，这些通过get_video_blobs单独加载
+            columns = [col for col in self.dataset.schema.names
+                      if col not in ["video", "video_depth"]]
+            row = self.dataset.take([index], columns=columns)
             return {key: row[key][0].as_py() for key in row.schema.names}
         except Exception as e:
             print(f"加载轨迹 {index} 失败: {e}")
             return None
 
     def get_video_blobs(self, index: int) -> dict:
-        """获取视频 blobs（带缓存）。"""
-        if index not in self._video_cache:
-            row = self.dataset.take([index], columns=["video", "video_depth"])
-            video = row["video"][0].as_py()
-            video_depth = row["video_depth"][0].as_py()
-            self._video_cache[index] = {
-                "video": video,
-                "video_depth": video_depth,
-                "num_cameras": len(video) if video else 0,
-            }
-        return self._video_cache[index]
+        """获取视频 blobs（带LRU缓存）。"""
+        if index in self._video_cache:
+            self._video_cache.move_to_end(index)
+            return self._video_cache[index]
+
+        row = self.dataset.take([index], columns=["video", "video_depth"])
+        video = row["video"][0].as_py()
+        video_depth = row["video_depth"][0].as_py()
+        result = {
+            "video": video,
+            "video_depth": video_depth,
+            "num_cameras": len(video) if video else 0,
+        }
+        self._video_cache[index] = result
+
+        # 超过限制则删除最旧的
+        if len(self._video_cache) > self._max_video_cache:
+            oldest = next(iter(self._video_cache))
+            del self._video_cache[oldest]
+            print(f"[video_cache] 清理轨迹 {oldest} 视频，当前缓存: {len(self._video_cache)}")
+
+        return result
 
     def create_trajectory_options(self) -> list[tuple[str, int]]:
         """批量读取所有轨迹 metadata，返回 (label, index) 列表。"""

@@ -278,7 +278,7 @@ renderer.setClearColor(0x0a0f1a);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 100);
-camera.position.set(1.2, 1.0, -1.5);  // 对应 Plotly eye (1.5, 1.5, 1.2) 变换后
+camera.position.set(1.2, 1.0, -1.5);
 camera.lookAt(0, 0.3, 0);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
@@ -289,68 +289,18 @@ scene.add(dirLight);
 const gridHelper = new THREE.GridHelper(2, 20, 0x374151, 0x1f2937);
 scene.add(gridHelper);
 
-// ── 坐标轴 + 刻度 ──
-// 数据坐标系 → Three.js 坐标系：
-//   数据 +X → three.js +X (红)
-//   数据 +Y → three.js -Z (绿)  ← 深度轴，原蓝轴方向反了就因为这里
-//   数据 +Z → three.js +Y (蓝)  ← 高度轴
-const AXIS_DEF = [
-  { dir: new THREE.Vector3(1, 0,  0), color: 0xf87171, label: 'X' },
-  { dir: new THREE.Vector3(0, 0, -1), color: 0x4ade80, label: 'Y' },
-  { dir: new THREE.Vector3(0, 1,  0), color: 0x60a5fa, label: 'Z' },
-];
-const AXIS_LEN = 0.5, TICK_STEP = 0.1;
-const _axisLabels = [];   // { el, pos3d }
+// ── 坐标轴（简化版）──
+const axisX = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0.5, 0, 0)]), new THREE.LineBasicMaterial({ color: 0xf87171 }));
+const axisY = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -0.5)]), new THREE.LineBasicMaterial({ color: 0x4ade80 }));
+const axisZ = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0.5, 0)]), new THREE.LineBasicMaterial({ color: 0x60a5fa }));
+scene.add(axisX, axisY, axisZ);
 
-function buildAxes() {
-  const container = document.getElementById('axis-labels');
-  AXIS_DEF.forEach(({ dir, color, label }) => {
-    const mat = new THREE.LineBasicMaterial({ color });
-    // 主轴线
-    scene.add(new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), dir.clone().multiplyScalar(AXIS_LEN)]),
-      mat
-    ));
-    const numTicks = Math.round(AXIS_LEN / TICK_STEP);
-    for (let t = 1; t <= numTicks; t++) {
-      const pos = dir.clone().multiplyScalar(t * TICK_STEP);
-      // 刻度数值标签
-      const el = document.createElement('div');
-      el.className = 'axis-lbl';
-      el.textContent = (t * TICK_STEP).toFixed(1);
-      el.style.color = `#${color.toString(16).padStart(6, '0')}`;
-      el.style.fontSize = '9px';
-      container.appendChild(el);
-      _axisLabels.push({ el, pos3d: pos.clone() });
-    }
-    // 轴名标签（含单位）
-    const nameEl = document.createElement('div');
-    nameEl.className = 'axis-lbl';
-    nameEl.textContent = `${label} (m)`;
-    nameEl.style.color = `#${color.toString(16).padStart(6, '0')}`;
-    nameEl.style.fontWeight = 'bold';
-    nameEl.style.fontSize = '13px';
-    container.appendChild(nameEl);
-    _axisLabels.push({ el: nameEl, pos3d: dir.clone().multiplyScalar(AXIS_LEN + 0.04) });
-  });
-}
-buildAxes();
-
-function updateAxisLabels() {
-  const W = viewport.clientWidth, H = viewport.clientHeight;
-  _axisLabels.forEach(({ el, pos3d }) => {
-    const p = pos3d.clone().project(camera);
-    if (p.z >= 1) { el.style.display = 'none'; return; }
-    el.style.display = '';
-    el.style.left = ((p.x + 1) / 2 * W) + 'px';
-    el.style.top  = (-(p.y - 1) / 2 * H) + 'px';
-  });
-}
+function updateAxisLabels() {}
 
 // 预创建场景对象
 function makeMeshObj(color, opacity = 0.75) {
   const g = new THREE.BufferGeometry();
-  const m = new THREE.MeshPhongMaterial({ color, opacity, transparent: opacity < 1, side: THREE.DoubleSide, shininess: 40 });
+  const m = new THREE.MeshPhongMaterial({ color, opacity, transparent: opacity < 1, side: THREE.DoubleSide });
   const o = new THREE.Mesh(g, m);
   o.visible = false;
   scene.add(o);
@@ -367,25 +317,24 @@ function makePointsObj(color, size = 0.006) {
 
 const OBJ = {
   manoMesh:   makeMeshObj(0x6ec6f5, 0.78),
-  objectMesh: makeMeshObj(0xffd700, 0.88),
-  manoJoints: makePointsObj(0xff4444, 0.007),
-  urdfJoints: makePointsObj(0xcc88ff, 0.008),
+  manoJoints: makePointsObj(0x6ec6f5, 0.012),
+  urdfJoints: makePointsObj(0xfbbf24, 0.012),
+  objectMesh: makeMeshObj(0xf87171, 0.88),
 };
 const urdfMeshObjs = Array.from({ length: 25 }, () => makeMeshObj(0xf5deb3, 0.7));
+let objectMeshData = null; // 存储物体网格数据（只加载一次）
 
 function setMesh(obj, data) {
   if (!data) { obj.visible = false; return; }
   const pos = new Float32Array(data.x.length * 3);
   for (let i = 0; i < data.x.length; i++) {
-    pos[i*3]   =  data.x[i];   //  X →  X
-    pos[i*3+1] =  data.z[i];   //  Z →  Y（Z-up → Y-up）
-    pos[i*3+2] = -data.y[i];   //  Y → -Z（深度轴翻转）
+    pos[i*3] = data.x[i]; pos[i*3+1] = data.z[i]; pos[i*3+2] = -data.y[i];
   }
   obj.geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   if (data.i) {
     const idx = new Uint32Array(data.i.length * 3);
     for (let f = 0; f < data.i.length; f++) {
-      idx[f*3]=data.i[f]; idx[f*3+1]=data.j[f]; idx[f*3+2]=data.k[f];
+      idx[f*3] = data.i[f]; idx[f*3+1] = data.j[f]; idx[f*3+2] = data.k[f];
     }
     obj.geometry.setIndex(new THREE.BufferAttribute(idx, 1));
   }
@@ -397,9 +346,7 @@ function setPoints(obj, data) {
   if (!data) { obj.visible = false; return; }
   const pos = new Float32Array(data.x.length * 3);
   for (let i = 0; i < data.x.length; i++) {
-    pos[i*3]   =  data.x[i];
-    pos[i*3+1] =  data.z[i];
-    pos[i*3+2] = -data.y[i];
+    pos[i*3] = data.x[i]; pos[i*3+1] = data.z[i]; pos[i*3+2] = -data.y[i];
   }
   obj.geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   obj.geometry.attributes.position.needsUpdate = true;
@@ -408,13 +355,10 @@ function setPoints(obj, data) {
 
 // ── 简易 Orbit 控制 ──
 const orbit = (() => {
-  const sph = new THREE.Spherical().setFromVector3(
-    new THREE.Vector3().subVectors(camera.position, new THREE.Vector3(0, 0.3, 0))
-  );
+  const sph = new THREE.Spherical(2.5, Math.PI/3, -Math.PI/2);
   const target = new THREE.Vector3(0, 0.3, 0);
   let mouse = null;
   const c = $('three-canvas');
-
   c.addEventListener('contextmenu', e => e.preventDefault());
   c.addEventListener('mousedown', e => { mouse = { x: e.clientX, y: e.clientY, btn: e.button }; });
   window.addEventListener('mouseup', () => { mouse = null; });
@@ -425,11 +369,6 @@ const orbit = (() => {
     if (mouse.btn === 0) {
       sph.theta -= dx * 0.008; sph.phi -= dy * 0.008;
       sph.phi = Math.max(0.05, Math.min(Math.PI - 0.05, sph.phi));
-    } else if (mouse.btn === 2) {
-      const right = new THREE.Vector3().crossVectors(camera.getWorldDirection(new THREE.Vector3()), camera.up).normalize();
-      const up = camera.up.clone();
-      const scale = sph.radius * 0.001;
-      target.addScaledVector(right, -dx * scale).addScaledVector(up, dy * scale);
     }
     update();
   });
@@ -437,11 +376,11 @@ const orbit = (() => {
     sph.radius = Math.max(0.05, sph.radius * (1 + e.deltaY * 0.001));
     update();
   }, { passive: true });
-
   function update() {
     camera.position.setFromSpherical(sph).add(target);
     camera.lookAt(target);
   }
+  update();
   return { update };
 })();
 
@@ -466,11 +405,24 @@ ro.observe(viewport);
 // ════════════════════════════════════════════════════════
 function apply3D(d) {
   const hasUrdfMesh = d.urdf_meshes && d.urdf_meshes.length > 0;
-  // URDF mesh 与 MANO mesh 互斥：URDF mesh 存在时隐藏 MANO mesh
   setMesh(OBJ.manoMesh, hasUrdfMesh ? null : d.mano_mesh);
   setPoints(OBJ.manoJoints, d.mano_joints);
   setPoints(OBJ.urdfJoints, d.urdf_joints);
-  setMesh(OBJ.objectMesh, d.object_mesh);
+
+  // 物体网格：使用变换而不是每帧传输完整数据
+  if (d.object_transform && objectMeshData) {
+    const {position, rotation} = d.object_transform;
+    OBJ.objectMesh.position.set(position[0], position[2], -position[1]);
+    const angle = Math.sqrt(rotation[0]**2 + rotation[1]**2 + rotation[2]**2);
+    if (angle > 0) {
+      const axis = new THREE.Vector3(rotation[0]/angle, rotation[2]/angle, -rotation[1]/angle);
+      OBJ.objectMesh.quaternion.setFromAxisAngle(axis, angle);
+    }
+    OBJ.objectMesh.visible = true;
+  } else {
+    OBJ.objectMesh.visible = false;
+  }
+
   if (hasUrdfMesh) {
     d.urdf_meshes.forEach((m, i) => setMesh(urdfMeshObjs[i], m));
     for (let i = d.urdf_meshes.length; i < 25; i++) urdfMeshObjs[i].visible = false;
@@ -796,6 +748,17 @@ async function loadTrajectory(index) {
     S.annotations = [];
     S.selAnno = null;
 
+    // 加载物体网格（只加载一次）
+    if (info.has_object_mesh) {
+      objectMeshData = await apiFetch(`./api/object_mesh/${index}`);
+      if (objectMeshData) {
+        setMesh(OBJ.objectMesh, objectMeshData);
+      }
+    } else {
+      objectMeshData = null;
+      OBJ.objectMesh.visible = false;
+    }
+
     $('traj-info').textContent = `${info.scene}  ·  ${info.operator}  ·  ${info.total_frames} 帧`;
     $('frame-slider').max = info.total_frames - 1;
     $('frame-slider').value = 0;
@@ -818,14 +781,14 @@ async function loadTrajectory(index) {
       $('curve-select').appendChild(o);
     });
 
-    // 预取曲线数据
+    // 预取曲线数据（批量获取）
     showLoading('预取曲线数据…');
-    await Promise.all(opts.map(async name => {
-      try {
-        const r = await apiFetch(`./api/curve/${index}/${encodeURIComponent(name)}`);
-        S.curveData[name] = r.data;
-      } catch {}
-    }));
+    try {
+      const allCurves = await apiFetch(`./api/curves/${index}/all`);
+      S.curveData = allCurves;
+    } catch (e) {
+      console.error('批量获取曲线失败:', e);
+    }
 
     // 加载已有标注
     try {
@@ -902,6 +865,7 @@ document.addEventListener('click', e => {
 $('curve-select').onchange = drawCurve;
 
 $('btn-play').onclick = () => {
+  if (S._playing) return; // 防止重复点击
   stopPlay();
   S._playing = true;
   const interval = 1000 / S.playFps;
