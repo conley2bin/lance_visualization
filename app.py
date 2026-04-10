@@ -37,7 +37,7 @@ app.add_middleware(
 # 静态文件（plotly.min.js 等）和首页
 _FRONTEND = Path(__file__).parent / "frontend"
 app.mount("/static", StaticFiles(directory=str(_FRONTEND)), name="static")
-
+app.mount("/viz/static", StaticFiles(directory=str(_FRONTEND)), name="viz_static")
 
 @app.get("/")
 def index():

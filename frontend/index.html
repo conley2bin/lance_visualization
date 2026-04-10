@@ -6,98 +6,98 @@
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  background: #111827; color: #e0e0e0;
+  background: #e8eaed; color: #2c3e50;
   font-family: 'Segoe UI', sans-serif; font-size: 13px;
   height: 100vh; display: flex; flex-direction: column; overflow: hidden;
 }
 
 /* ── 顶栏 ── */
 #topbar {
-  background: #1f2937; border-bottom: 1px solid #374151;
+  background: #f8f9fa; border-bottom: 1px solid #dee2e6;
   padding: 7px 14px; display: flex; align-items: center; gap: 12px; flex-shrink: 0;
 }
-#topbar h1 { font-size: 14px; color: #f87171; white-space: nowrap; }
-#traj-select { flex: 1; max-width: 480px; background: #374151; color: #e0e0e0; border: 1px solid #4b5563; border-radius: 4px; padding: 4px 8px; }
-#traj-info { color: #9ca3af; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#topbar h1 { font-size: 14px; color: #1890ff; white-space: nowrap; }
+#traj-select { flex: 1; max-width: 480px; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; }
+#traj-info { color: #7f8c8d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── 轨迹搜索 ── */
 #traj-search-wrap { position: relative; flex: 1; max-width: 480px; }
-#traj-search { width: 100%; background: #374151; color: #e0e0e0; border: 1px solid #4b5563; border-radius: 4px; padding: 4px 8px; outline: none; }
-#traj-search:focus { border-color: #f87171; }
+#traj-search { width: 100%; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; outline: none; }
+#traj-search:focus { border-color: #1890ff; }
 #traj-dropdown {
   display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 999;
-  background: #1f2937; border: 1px solid #4b5563; border-radius: 4px;
+  background: #ffffff; border: 1px solid #dee2e6; border-radius: 4px;
   max-height: 260px; overflow-y: auto; margin-top: 2px;
 }
 #traj-dropdown.open { display: block; }
 .traj-item { padding: 5px 8px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.traj-item:hover, .traj-item.active { background: #374151; color: #f87171; }
+.traj-item:hover, .traj-item.active { background: #f8f9fa; color: #1890ff; }
 
 /* ── 主体 ── */
 #main {
   flex: 1; display: grid;
-  grid-template-columns: 210px 1fr 240px;
-  grid-template-rows: 1fr 180px;
+  grid-template-columns: 210px 1fr 400px;
+  grid-template-rows: 1fr 200px;
   gap: 3px; padding: 3px; overflow: hidden; min-height: 0;
 }
 
 /* ── 左侧控制 ── */
 #controls {
-  grid-row: 1 / 3; background: #1f2937; border-radius: 6px;
+  grid-row: 1 / 3; background: #ffffff; border-radius: 6px; border: 1px solid #dee2e6;
   padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
 }
-.sec { border-bottom: 1px solid #374151; padding-bottom: 10px; }
+.sec { border-bottom: 1px solid #ecf0f1; padding-bottom: 10px; }
 .sec:last-child { border-bottom: none; }
-.sec-title { color: #f87171; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+.sec-title { color: #1890ff; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
 
-#frame-slider { width: 100%; accent-color: #f87171; cursor: pointer; margin: 4px 0; }
-#frame-label { color: #9ca3af; font-size: 11px; }
+#frame-slider { width: 100%; accent-color: #1890ff; cursor: pointer; margin: 4px 0; }
+#frame-label { color: #7f8c8d; font-size: 11px; }
 
 .play-row { display: flex; gap: 5px; margin-top: 6px; }
 .btn { flex: 1; padding: 5px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; }
-#btn-play { background: #ef4444; color: #fff; }
-#btn-pause { background: #374151; color: #e0e0e0; }
-#btn-play:hover { background: #dc2626; }
-#btn-pause:hover { background: #4b5563; }
+#btn-play { background: #1890ff; color: #fff; }
+#btn-pause { background: #f8f9fa; color: #2c3e50; }
+#btn-play:hover { background: #096dd9; }
+#btn-pause:hover { background: #dde1e3; }
 
 .cb-group { display: flex; flex-direction: column; gap: 3px; }
 .cb-row { display: flex; align-items: center; gap: 6px; cursor: pointer; line-height: 1.6; }
-.cb-row input { accent-color: #f87171; cursor: pointer; }
+.cb-row input { accent-color: #1890ff; cursor: pointer; }
 
-select.small { width: 100%; background: #374151; color: #e0e0e0; border: 1px solid #4b5563; border-radius: 4px; padding: 3px 6px; margin-top: 3px; }
+select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 3px 6px; margin-top: 3px; }
 #curve-select { height: 110px; }
 
 /* ── 3D 视口 ── */
 #viewport {
   grid-column: 2; grid-row: 1;
-  background: #0a0f1a; border-radius: 6px; overflow: hidden; position: relative;
+  background: #14181f; border-radius: 6px; overflow: hidden; position: relative;
 }
 #three-canvas { width: 100%; height: 100%; display: block; }
-#viewport-hint { position: absolute; bottom: 6px; right: 8px; color: #4b5563; font-size: 10px; pointer-events: none; }
+#viewport-hint { position: absolute; bottom: 6px; right: 8px; color: #bfbfbf; font-size: 10px; pointer-events: none; }
 .axis-lbl { position: absolute; font-size: 10px; pointer-events: none; transform: translate(-50%, -50%); white-space: nowrap; }
 
 /* ── 视频 ── */
 #video-panel {
   grid-column: 3; grid-row: 1;
-  background: #1f2937; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden;
+  background: #ffffff; border-radius: 6px; border: 1px solid #dee2e6; display: flex; flex-direction: column; overflow: hidden;
 }
-#video-title { color: #f87171; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; padding: 6px 10px; border-bottom: 1px solid #374151; flex-shrink: 0; }
+#video-title { color: #1890ff; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; padding: 6px 10px; border-bottom: 1px solid #dee2e6; flex-shrink: 0; }
 #video-wrap { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 #video-img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
-#video-none { color: #4b5563; font-size: 12px; }
+#video-none { color: #bfbfbf; font-size: 12px; }
 
 /* ── 底部：标注时间轴 + 曲线图 ── */
 #bottom {
   grid-column: 2 / 4; grid-row: 2;
-  background: #1f2937; border-radius: 6px;
+  background: #ffffff; border-radius: 6px; border: 1px solid #dee2e6;
   display: flex; flex-direction: column; overflow: hidden;
 }
-#bottom-tabs { display: flex; border-bottom: 1px solid #374151; flex-shrink: 0; }
+#bottom-tabs { display: flex; border-bottom: 1px solid #dee2e6; flex-shrink: 0; }
 .tab-btn {
-  padding: 5px 14px; background: none; border: none; color: #9ca3af;
+  padding: 5px 14px; background: none; border: none; color: #7f8c8d;
   cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent;
 }
-.tab-btn.active { color: #f87171; border-bottom-color: #f87171; }
+.tab-btn.active { color: #1890ff; border-bottom-color: #1890ff; }
 #tab-anno, #tab-curve { flex: 1; overflow: hidden; }
 #tab-curve { display: none; }
 
@@ -105,19 +105,19 @@ select.small { width: 100%; background: #374151; color: #e0e0e0; border: 1px sol
 #anno-wrap { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; height: 100%; }
 #timeline-canvas { width: 100%; height: 52px; cursor: crosshair; border-radius: 4px; }
 #anno-controls { display: flex; gap: 6px; align-items: center; }
-#anno-label-input { flex: 1; background: #374151; color: #e0e0e0; border: 1px solid #4b5563; border-radius: 4px; padding: 3px 8px; font-size: 12px; }
+#anno-label-input { flex: 1; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 3px 8px; font-size: 12px; }
 .anno-btn { padding: 4px 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
 #btn-anno-add { background: #059669; color: #fff; }
-#btn-anno-del { background: #dc2626; color: #fff; }
-#btn-anno-save { background: #2563eb; color: #fff; }
+#btn-anno-del { background: #c0392b; color: #fff; }
+#btn-anno-save { background: #1890ff; color: #fff; }
 .anno-btn:hover { filter: brightness(1.15); }
 #anno-list { overflow-x: auto; display: flex; gap: 6px; flex-wrap: nowrap; font-size: 11px; }
 .anno-tag {
-  background: #374151; border-radius: 3px; padding: 2px 8px;
+  background: #e8eaed; border-radius: 3px; padding: 2px 8px;
   white-space: nowrap; cursor: pointer; border: 1px solid transparent;
 }
-.anno-tag:hover { border-color: #f87171; }
-.anno-tag.selected { border-color: #f87171; background: #4b1c1c; }
+.anno-tag:hover { border-color: #1890ff; }
+.anno-tag.selected { border-color: #1890ff; background: #e6f7ff; }
 
 /* 曲线图 */
 #curve-wrap { padding: 8px 10px; height: 100%; display: flex; flex-direction: column; gap: 4px; }
@@ -125,13 +125,13 @@ select.small { width: 100%; background: #374151; color: #e0e0e0; border: 1px sol
 
 /* ── 加载遮罩 ── */
 #loading {
-  position: fixed; inset: 0; background: rgba(5,10,20,0.88);
+  position: fixed; inset: 0; background: rgba(228,231,235,0.92);
   display: flex; align-items: center; justify-content: center; z-index: 999; flex-direction: column; gap: 12px;
 }
 #loading.hidden { display: none; }
-.spinner { width: 36px; height: 36px; border: 3px solid #374151; border-top-color: #f87171; border-radius: 50%; animation: spin 0.7s linear infinite; }
+.spinner { width: 36px; height: 36px; border: 3px solid #d9d9d9; border-top-color: #1890ff; border-radius: 50%; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-#loading-msg { color: #9ca3af; font-size: 13px; }
+#loading-msg { color: #7f8c8d; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -274,11 +274,11 @@ function stopPlay() {
 // ════════════════════════════════════════════════════════
 const renderer = new THREE.WebGLRenderer({ canvas: $('three-canvas'), antialias: true, alpha: false });
 renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setClearColor(0x0a0f1a);
+renderer.setClearColor(0x14181f);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 100);
-camera.position.set(1.2, 1.0, -1.5);
+camera.position.set(1.04, 1.15, -1.04);
 camera.lookAt(0, 0.3, 0);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
@@ -286,16 +286,61 @@ const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
 dirLight.position.set(1, 2, 1);
 scene.add(dirLight);
 
-const gridHelper = new THREE.GridHelper(2, 20, 0x374151, 0x1f2937);
+const gridHelper = new THREE.GridHelper(2, 20, 0x4a5568, 0x2d3748);
 scene.add(gridHelper);
 
 // ── 坐标轴（简化版）──
-const axisX = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0.5, 0, 0)]), new THREE.LineBasicMaterial({ color: 0xf87171 }));
-const axisY = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -0.5)]), new THREE.LineBasicMaterial({ color: 0x4ade80 }));
+const axisX = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0.5, 0, 0)]), new THREE.LineBasicMaterial({ color: 0x60a5fa }));
+const axisY = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -0.5)]), new THREE.LineBasicMaterial({ color: 0x60a5fa }));
 const axisZ = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0.5, 0)]), new THREE.LineBasicMaterial({ color: 0x60a5fa }));
 scene.add(axisX, axisY, axisZ);
 
-function updateAxisLabels() {}
+// ── 坐标轴刻度标签 ──
+const _axisLabelsContainer = $('axis-labels');
+// 预先创建标签 DOM 元素（X/Y/Z 各若干个刻度）
+// X 轴: 数据 X → Three.js X，范围 0~0.5m，刻度 0.1m
+// Y 轴: 数据 Y → Three.js -Z，范围 0~0.5m，刻度 0.1m
+// Z 轴: 数据 Z → Three.js Y，范围 0~0.5m，刻度 0.1m
+const AXIS_TICKS = [
+  // { pos: THREE.Vector3, label, color }
+  ...([0.1, 0.2, 0.3, 0.4, 0.5].map(v => ({ pos: new THREE.Vector3(v, 0, 0),       label: `${v}m`, color: '#eeeeee' }))),
+  ...([0.1, 0.2, 0.3, 0.4, 0.5].map(v => ({ pos: new THREE.Vector3(0, 0, -v),      label: `${v}m`, color: '#eeeeee' }))),
+  ...([0.1, 0.2, 0.3, 0.4, 0.5].map(v => ({ pos: new THREE.Vector3(0, v, 0),       label: `${v}m`, color: '#eeeeee' }))),
+  // 轴名称标签
+  { pos: new THREE.Vector3(0.52, 0, 0),  label: 'X', color: '#60a5fa' },
+  { pos: new THREE.Vector3(0, 0, -0.52), label: 'Y', color: '#60a5fa' },
+  { pos: new THREE.Vector3(0, 0.52, 0),  label: 'Z', color: '#60a5fa' },
+];
+// 为每个刻度创建 DOM 元素
+const _tickEls = AXIS_TICKS.map(t => {
+  const el = document.createElement('div');
+  el.className = 'axis-lbl';
+  el.style.color = t.color;
+  el.style.fontSize = t.label.length === 1 ? '12px' : '9px';
+  el.style.fontWeight = t.label.length === 1 ? 'bold' : 'normal';
+  el.textContent = t.label;
+  _axisLabelsContainer.appendChild(el);
+  return el;
+});
+const _ndcV = new THREE.Vector3();
+function updateAxisLabels() {
+  const vp = $('viewport');
+  const W = vp.clientWidth, H = vp.clientHeight;
+  AXIS_TICKS.forEach((t, i) => {
+    _ndcV.copy(t.pos).project(camera);
+    // NDC → CSS pixel（注意 Y 轴翻转）
+    const x = (_ndcV.x + 1) * 0.5 * W;
+    const y = (1 - (_ndcV.y + 1) * 0.5) * H;
+    // 在视锥体后方则隐藏
+    if (_ndcV.z > 1 || _ndcV.z < -1) {
+      _tickEls[i].style.display = 'none';
+    } else {
+      _tickEls[i].style.display = '';
+      _tickEls[i].style.left = x + 'px';
+      _tickEls[i].style.top  = y + 'px';
+    }
+  });
+}
 
 // 预创建场景对象
 function makeMeshObj(color, opacity = 0.75) {
@@ -319,7 +364,7 @@ const OBJ = {
   manoMesh:   makeMeshObj(0x6ec6f5, 0.78),
   manoJoints: makePointsObj(0x6ec6f5, 0.012),
   urdfJoints: makePointsObj(0xfbbf24, 0.012),
-  objectMesh: makeMeshObj(0xf87171, 0.88),
+  objectMesh: makeMeshObj(0xFFD700, 0.88),
 };
 const urdfMeshObjs = Array.from({ length: 25 }, () => makeMeshObj(0xf5deb3, 0.7));
 let objectMeshData = null; // 存储物体网格数据（只加载一次）
@@ -355,7 +400,7 @@ function setPoints(obj, data) {
 
 // ── 简易 Orbit 控制 ──
 const orbit = (() => {
-  const sph = new THREE.Spherical(2.5, Math.PI/3, -Math.PI/2);
+  const sph = new THREE.Spherical(1.37, 0.91, 1.50);
   const target = new THREE.Vector3(0, 0.3, 0);
   let mouse = null;
   const c = $('three-canvas');
@@ -369,6 +414,16 @@ const orbit = (() => {
     if (mouse.btn === 0) {
       sph.theta -= dx * 0.008; sph.phi -= dy * 0.008;
       sph.phi = Math.max(0.05, Math.min(Math.PI - 0.05, sph.phi));
+    } else if (mouse.btn === 2) {
+      // 右键平移：沿相机的右方向和上方向移动 target
+      const scale = sph.radius * 0.001;
+      const right = new THREE.Vector3();
+      const up = new THREE.Vector3();
+      camera.getWorldDirection(right); // 临时借用
+      right.crossVectors(camera.up, right).normalize(); // 实际右方向（注意叉积顺序）
+      up.copy(camera.up).normalize();
+      target.addScaledVector(right, dx * scale);
+      target.addScaledVector(up, dy * scale);
     }
     update();
   });
@@ -498,7 +553,7 @@ function drawTimeline() {
   tlCtx.clearRect(0, 0, W, H);
 
   // 背景
-  tlCtx.fillStyle = '#111827';
+  tlCtx.fillStyle = '#ecf0f1';
   tlCtx.fillRect(0, 0, W, H);
 
   if (!S.totalFrames) return;
@@ -534,7 +589,7 @@ function drawTimeline() {
   }
 
   // 刻度（每 10 帧一小格）
-  tlCtx.fillStyle = '#374151';
+  tlCtx.fillStyle = '#b2bec3';
   const step = Math.max(1, Math.floor(S.totalFrames / 50));
   for (let f = 0; f <= S.totalFrames; f += step) {
     const x = f2x(f);
@@ -543,7 +598,7 @@ function drawTimeline() {
 
   // 当前帧线
   const cx = f2x(S.frameIdx);
-  tlCtx.strokeStyle = '#f87171';
+  tlCtx.strokeStyle = '#1890ff';
   tlCtx.lineWidth = 2;
   tlCtx.beginPath();
   tlCtx.moveTo(cx, 0); tlCtx.lineTo(cx, H);
@@ -682,12 +737,12 @@ function drawCurve() {
   const v2y = v => pad.t + iH - (v - minV) / range * iH;
 
   // 网格
-  ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 1;
+  ctx.strokeStyle = '#e8e8e8'; ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
     const y = pad.t + iH * i / 4;
     ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + iW, y); ctx.stroke();
     const val = maxV - range * i / 4;
-    ctx.fillStyle = '#6b7280'; ctx.font = '10px sans-serif';
+    ctx.fillStyle = '#7f8c8d'; ctx.font = '10px sans-serif';
     ctx.fillText(val.toFixed(3), 0, y + 3);
   }
 
@@ -704,7 +759,7 @@ function drawCurve() {
 
   // 当前帧线
   const cx = f2x(S.frameIdx);
-  ctx.strokeStyle = '#f87171'; ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#1890ff'; ctx.lineWidth = 1.5;
   ctx.setLineDash([4, 3]);
   ctx.beginPath(); ctx.moveTo(cx, pad.t); ctx.lineTo(cx, pad.t + iH); ctx.stroke();
   ctx.setLineDash([]);
@@ -826,7 +881,7 @@ function renderDropdown(keyword) {
   const dd = $('traj-dropdown');
   dd.innerHTML = '';
   if (!items.length) {
-    dd.innerHTML = '<div class="traj-item" style="color:#6b7280">无匹配结果</div>';
+    dd.innerHTML = '<div class="traj-item" style="color:#bfbfbf">无匹配结果</div>';
   } else {
     items.forEach(({ label, index }) => {
       const el = document.createElement('div');
@@ -843,7 +898,7 @@ function renderDropdown(keyword) {
     if (matched.length > SHOW_MAX) {
       const hint = document.createElement('div');
       hint.className = 'traj-item';
-      hint.style.color = '#6b7280';
+      hint.style.color = '#bfbfbf';
       hint.textContent = `…还有 ${matched.length - SHOW_MAX} 条，请继续输入筛选`;
       dd.appendChild(hint);
     }
