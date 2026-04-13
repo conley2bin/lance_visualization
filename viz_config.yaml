@@ -29,6 +29,10 @@ paths:
   # Docker 环境下通常为 /app，本地运行时为项目根目录
   project_root: /app
 
+viewer:
+  # 当前后端 adapter 类型；后续可扩展 parquet / tactile / dex-hand 等实现
+  type: lance
+
 defaults:
   # 服务启动后默认选中的轨迹索引
   trajectory_index: 0

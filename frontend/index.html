@@ -814,7 +814,7 @@ async function loadTrajectory(index) {
       OBJ.objectMesh.visible = false;
     }
 
-    $('traj-info').textContent = `${info.scene}  ·  ${info.operator}  ·  ${info.total_frames} 帧`;
+    $('traj-info').textContent = `${info.title}  ·  ${info.subtitle}  ·  ${info.total_frames} 帧`;
     $('frame-slider').max = info.total_frames - 1;
     $('frame-slider').value = 0;
 
@@ -835,6 +835,7 @@ async function loadTrajectory(index) {
       if (defaults.includes(name)) o.selected = true;
       $('curve-select').appendChild(o);
     });
+
 
     // 预取曲线数据（批量获取）
     showLoading('预取曲线数据…');

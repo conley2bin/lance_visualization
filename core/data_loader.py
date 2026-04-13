@@ -75,10 +75,13 @@ class OptimizedLanceLoader:
     def create_trajectory_options(self) -> list[tuple[str, int]]:
         """批量读取所有轨迹 metadata，返回 (label, index) 列表。"""
         table = self.dataset.to_table(columns=["index", "trajectory_metadata"])
+
+        # 批量转换为 Python 对象，避免逐行调用 as_py()
+        index_list = table["index"].to_pylist()
+        meta_list = table["trajectory_metadata"].to_pylist()
+
         options = []
-        for i in range(len(table)):
-            index_data = table["index"][i].as_py()
-            meta = table["trajectory_metadata"][i].as_py()
+        for i, (index_data, meta) in enumerate(zip(index_list, meta_list)):
             frames = meta.get("total_frames", 0) if meta else 0
             if frames > 0:
                 scene = index_data.get("scene", "?") if index_data else "?"
