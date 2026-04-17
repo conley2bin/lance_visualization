@@ -1,313 +1,262 @@
-# Lance 数据集可视化服务
+# lance_viz_new：FastAPI + Three.js 可视化模板
 
-基于 FastAPI + Three.js 的 Lance 格式运动捕捉数据集可视化工具，支持 MANO 手模型、URDF 机器人模型、物体 6DoF 姿态、同步视频回放及时间轴标注。
+本项目用于将 notebook 中的时序可视化逻辑，沉淀为可复用的 **后端 API + 前端交互壳**。
+当前已落地 Lance 数据集（MANO/URDF/物体/视频/曲线/标注），并支持后续扩展到 parquet、触觉力觉、灵巧手等数据源。
 
-## 功能概览
+---
 
-- **3D 可视化**：MANO 手部网格/关节、URDF 机器人关节/网格、物体模型，帧级别同步渲染
-- **视频回放**：多摄像头彩色/深度视频与 3D 场景帧同步
-- **数据曲线**：时间序列数据的多曲线叠加显示
-- **时间轴标注**：拖拽创建/编辑/保存帧级别标注区间，持久化为 JSON
-- **轨迹搜索**：支持模糊搜索，从万级轨迹中快速定位
+## 1. 核心目标
 
-## 快速开始
+- 提供统一的可视化 Web 服务：`FastAPI` 后端 + `Three.js` 前端
+- 将“数据源差异”限制在 adapter 层，不污染 API 编排层与前端壳
+- 形成通用模板：
+  - notebook-specific 逻辑（比如 Lance/MANO）放在 adapter 实现
+  - 通用 API 契约与页面交互保持稳定
 
-### 方式一：Docker（推荐）
+---
 
-**1. 配置环境变量**
+## 2. 技术栈
 
-复制并编辑 `deploy/.env`：
+- 后端：Python 3.10 + FastAPI + Uvicorn
+- 数据层：Lance + PyArrow（当前实现）
+- 3D/几何：MANO、URDF、trimesh
+- 前端：单页 HTML + Three.js
+- 通信：REST API（JSON）
 
-```bash
-cp deploy/.env.example deploy/.env  # 若有模板
-# 或直接编辑
-vim deploy/.env
+---
+
+## 3. 整体架构（实现框架）
+
+```text
+┌────────────────────────────────────┐
+│ Frontend (Three.js SPA)            │
+│ - 轨迹选择/搜索                    │
+│ - 3D 场景渲染                      │
+│ - 视频面板                          │
+│ - 曲线面板                          │
+│ - 标注面板                          │
+└──────────────┬─────────────────────┘
+               │ HTTP JSON
+┌──────────────▼─────────────────────┐
+│ FastAPI API Orchestration Layer     │
+│ app.py                              │
+│ - 路由与请求编排                    │
+│ - 轨迹状态 LRU 缓存                 │
+│ - 标注文件读写                      │
+└──────────────┬─────────────────────┘
+               │ Protocol
+┌──────────────▼─────────────────────┐
+│ Adapter Abstraction                 │
+│ core/adapters.py (ViewerAdapter)    │
+│ core/viewer_factory.py              │
+└──────────────┬─────────────────────┘
+               │ implementation
+┌──────────────▼─────────────────────┐
+│ Lance Adapter (current)             │
+│ core/lance_adapter.py               │
+│ - list/get metadata                 │
+│ - build state                       │
+│ - frame/video/curves payload        │
+└──────────────┬─────────────────────┘
+               │
+┌──────────────▼─────────────────────┐
+│ Data + Compute Layer                │
+│ core/data_loader.py                 │
+│ core/visualization.py               │
+│ core/curves.py / core/video.py      │
+└────────────────────────────────────┘
 ```
 
-必填项：
+---
 
-```env
-HOST_DATA_PATH=/path/to/your/data     # 宿主机数据目录，将挂载为容器内 /data
-HOST_NAS_PATH=/mnt/nas-222-project    # NAS 挂载路径（含 Lance 数据集）
-LANCE_DATASET=/mnt/nas-222-project/mocap/releases/v0.5/trajectories_preprocessed.lance
+## 4. 后端实现方案（FastAPI）
+
+### 4.1 分层职责
+
+1. **配置层**：`core/config.py`
+   - 读取 `viz_config.yaml`
+   - 解析数据路径、资源目录、标注目录等
+
+2. **Adapter 抽象层**：`core/adapters.py`
+   - 定义 `ViewerAdapter` Protocol
+   - 定义统一 payload schema（TrajectoryInfo、FramePayload、LoadPayload 等）
+
+3. **Adapter 实现层（Lance）**：`core/lance_adapter.py`
+   - 负责 Lance 数据读取、状态构建、帧数据与曲线输出
+
+4. **工厂层**：`core/viewer_factory.py`
+   - 按 `viewer.type` 创建对应 adapter
+
+5. **API 编排层**：`app.py`
+   - 只做路由编排、缓存管理、标注持久化
+   - 不直接耦合 Lance/MANO 具体实现
+
+---
+
+### 4.2 关键接口（API 契约）
+
+- `GET /api/trajectories`：轨迹列表
+- `GET /api/trajectory/{index}`：轨迹元信息
+- `GET /api/trajectory/{index}/load`：轨迹加载信息（总帧数、曲线选项、可用资源）
+- `GET /api/frame/{index}/{frame_idx}`：3D 帧数据
+- `GET /api/object_mesh/{index}`：物体网格
+- `GET /api/video/{index}/{cam_idx}/{frame_idx}`：视频帧
+- `GET /api/curves/{index}`：曲线名列表
+- `GET /api/curves/{index}/all`：全部曲线值
+- `GET /api/curve/{index}/{curve_name}`：单曲线值
+- `GET/POST /api/annotations/{index}`：标注读写
+
+---
+
+### 4.3 缓存与首次加载优化
+
+- 轨迹状态缓存：`app.py` 中 `_state_cache`（LRU，默认最多 10 条）
+- 启动预热：服务启动时预加载默认轨迹（`defaults.trajectory_index`）
+- 列表性能优化：`core/data_loader.py` 中轨迹列表构建改为批量 `to_pylist()`，避免逐行 `as_py()`
+
+#### 4.4 复杂模型卡顿关键优化
+
+该优化针对`powerdrill`、`largeclamp` 等高面数模型（约 262k 顶点 / 524k 面）：
+
+1. **旧问题（导致切帧 3-5 分钟）**
+   - 旧路径在每一帧都返回完整 `object_mesh`（顶点+面片）
+   - 单帧数据可达约 18MB，播放/拖帧时重复传输与 JSON 解析，导致严重卡顿
+
+2. **当前方案**
+   - 新增一次性网格接口：`GET /api/object_mesh/{index}`
+   - 帧接口仅返回物体位姿：`object_transform`（position + rotation）
+   - 前端首条轨迹只加载一次物体 mesh，后续每帧只更新 transform，不再重复下载 mesh
+
+3. **效果**
+   - 将“每帧大网格传输”改为“首帧一次 + 每帧小位姿数据”
+   - 大幅降低切帧延迟与卡顿风险，是复杂模型可交互的关键优化
+
+> 结论：复杂模型场景下，性能收益最大的改动是“mesh 与 transform 解耦传输”，而不是单纯调整缓存条数。
+
+---
+
+## 5. 前端实现方案（Three.js）
+
+### 5.1 页面结构
+
+`frontend/index.html` 为单页应用，包含：
+
+- 顶部控制：轨迹搜索、轨迹切换、播放控制
+- 左侧/中间：3D 场景（Three.js）
+- 右侧：视频帧
+- 底部：曲线图 + 标注时间轴
+
+### 5.2 核心流程
+
+1. 启动时请求 `/api/trajectories`
+2. 选择默认轨迹，调用 `/api/trajectory/{index}/load`
+3. 若存在物体模型，调用 `/api/object_mesh/{index}` **仅加载一次静态 mesh**
+4. 拉取首帧 `/api/frame/...` 与视频 `/api/video/...`
+5. 每次切帧只刷新 frame/video；其中物体仅更新 `object_transform`，不重复拉取 mesh
+6. 用户拖动帧轴时增量刷新 frame/video
+
+### 5.3 渲染策略
+
+- Three.js 负责 3D mesh 与 points 可视化
+- 曲线面板使用 canvas 绘制
+- 标注面板支持区间编辑并回写后端 JSON
+
+---
+
+## 6. 配置说明
+
+配置文件：`viz_config.yaml`
+
+关键字段：
+
+```yaml
+paths:
+  lance_dataset: /path/to/trajectories_preprocessed.lance
+  mano_model: /app/assets/models/MANO_RIGHT.pkl
+  urdf: ""
+  object_mesh: ""
+  annotations_dir: /app/annotations
+  project_root: /app
+
+viewer:
+  type: lance
+
+defaults:
+  trajectory_index: 0
+  camera_index: 0
+  video_stream: color
+  playback_fps: 15
+  hand: right
 ```
 
-**2. 构建并启动**
+说明：
+- `viewer.type` 用于选择 adapter（当前支持 `lance`）
+- 后续新增数据源时，扩展 adapter 并在工厂注册即可
+
+---
+
+## 7. 快速启动
+
+### Docker（推荐）
 
 ```bash
 cd deploy
 docker compose up -d --build
 ```
 
-**3. 访问服务**
+访问：`http://localhost:8868`
 
-浏览器打开 `http://localhost:8868`
-
----
-
-### 方式二：本地直接运行
-
-**环境要求**：Python 3.10（不兼容 3.11+，原因见[依赖说明](#依赖说明)）
-
-**1. 安装依赖**
+### 本地运行
 
 ```bash
 pip install -r deploy/requirements.txt
-
-# 额外安装（需网络访问 GitHub）
-pip install --no-build-isolation git+https://github.com/mattloper/chumpy
-pip install --no-build-isolation git+https://github.com/lixiny/manotorch.git
-```
-
-**2. 准备配置**
-
-将项目根目录的 `viz_config.yaml` 按实际路径修改（该文件已包含所有配置项及注释）：
-
-```bash
-vim viz_config.yaml
-```
-
-**3. 启动服务**
-
-```bash
 uvicorn app:app --host 0.0.0.0 --port 8868 --reload
 ```
 
 ---
 
-## 配置文件说明
+## 8. 项目目录（当前）
 
-服务启动时按以下优先级查找配置（先找到即停止）：
-
-1. `/data/viz_config.yaml`（Docker 环境默认挂载位置）
-2. 当前工作目录下的 `viz_config.yaml`
-3. 项目根目录下的 `viz_config.yaml`
-
-**环境变量优先级高于配置文件**，可覆盖任意配置项。
-
-### 完整配置结构
-
-```yaml
-paths:
-  # Lance 数据集路径（必填）
-  lance_dataset: /mnt/nas-222-project/mocap/releases/v0.5/trajectories_preprocessed.lance
-
-  # MANO 手模型文件路径（.pkl 格式）
-  # 使用左手数据时改为 MANO_LEFT.pkl
-  mano_model: /app/assets/models/MANO_RIGHT.pkl
-
-  # URDF 模型路径（可选，不填则不渲染机器人模型）
-  urdf: ""
-
-  # 物体网格路径（可选，通常从 assets/objects/ 自动读取）
-  object_mesh: ""
-
-  # 标注文件保存目录（Docker 下需挂载为可读写卷）
-  annotations_dir: /app/annotations
-
-  # 资源根目录（assets/ 所在的父目录）
-  project_root: /app
-
-defaults:
-  # 服务启动后默认选中的轨迹索引
-  trajectory_index: 0
-
-  # 默认摄像头索引（0 表示第一个摄像头）
-  camera_index: 0
-
-  # 默认视频流类型：color（彩色）或 depth（深度）
-  video_stream: color
-
-  # 自动播放帧率（FPS），影响播放速度
-  playback_fps: 15
-
-  # 手型：right（右手）或 left（左手），需与 mano_model 对应
-  hand: right
-```
-
-### 环境变量参考
-
-| 变量名 | 对应配置 | 说明 |
-|--------|---------|------|
-| `LANCE_DATASET` | `paths.lance_dataset` | Lance 数据集路径 |
-| `MANO_MODEL_PATH` | `paths.mano_model` | MANO 模型文件路径 |
-| `ANNOTATIONS_DIR` | `paths.annotations_dir` | 标注文件保存目录 |
-| `PROJECT_ROOT` | `paths.project_root` | 项目资源根目录 |
-
----
-
-## deploy/.env 说明
-
-`deploy/.env` 专用于 Docker Compose 卷挂载，与上面的 `viz_config.yaml` 是两套独立配置。
-
-```env
-# ===== 宿主机路径（卷挂载来源）=====
-
-# 数据目录，将挂载为容器内 /data
-HOST_DATA_PATH=/home/user/data
-
-# NAS 挂载路径，挂载为容器内 /mnt/nas-222-project 和 /mnt/nas-222
-HOST_NAS_PATH=/mnt/nas-222-project
-
-# assets/ 目录（MANO 模型、物体 STL 等），挂载为 /app/assets
-HOST_ASSETS_PATH=../assets
-
-# 标注文件保存目录，挂载为 /app/annotations（可读写）
-HOST_ANNOTATIONS_PATH=../annotations
-
-# ===== Docker 服务配置 =====
-
-# 服务端口，同时影响容器端口映射
-APP_PORT=8868
-
-# 时区
-TZ=Asia/Shanghai
-
-# 应用配置（Lance 路径、MANO 模型、播放参数等）请编辑 viz_config.yaml
-```
-
----
-
-## API 接口说明
-
-服务启动后提供以下 REST API（基础路径为服务根路径）：
-
-| 接口 | 方法 | 说明 |
-|------|------|------|
-| `/api/trajectories` | GET | 获取全部轨迹列表，返回 `[{label, index}]` |
-| `/api/trajectory/{index}` | GET | 获取轨迹元数据（场景、操作员、帧数等） |
-| `/api/trajectory/{index}/load` | GET | 预加载轨迹，返回完整信息及可用曲线列表 |
-| `/api/frame/{index}/{frame_idx}` | GET | 获取指定帧 3D 数据（顶点、面片） |
-| `/api/video/{index}/{cam_idx}/{frame_idx}` | GET | 获取指定帧视频图像（base64） |
-| `/api/curves/{index}` | GET | 获取轨迹所有可用曲线名称 |
-| `/api/curve/{index}/{curve_name}` | GET | 获取指定曲线的全帧数据 |
-| `/api/annotations/{index}` | GET | 读取轨迹标注 |
-| `/api/annotations/{index}` | POST | 保存轨迹标注 |
-
----
-
-## 数据格式要求
-
-### Lance 数据集列结构
-
-每条轨迹对应数据集中的一行（row），需包含以下列：
-
-| 列名 | 形状 | 说明 |
-|------|------|------|
-| `index` | dict | 包含 `scene`、`operator`、`uuid`、`capMachine` |
-| `trajectory_metadata` | dict | 包含 `total_frames`、`mano_hand_shapes`、`object_names` |
-| `hands[*].mano_joint_pos` | `(T, 63)` | 21 个关节位置，需 reshape 为 `(T, 21, 3)` |
-| `hands[*].mano_global_rot_aa` | `(T, 3)` | 全局旋转（轴角） |
-| `hands[*].mano_global_pos` | `(T, 3)` | 全局位置（米） |
-| `hands[*].mano_hand_pose` | `(T, 45)` | 手指 pose（15 关节 × 3） |
-| `hands[*].urdf_dof` | `(T, nDOF)` | 机器人 URDF 自由度值 |
-| `objects[*].pos` | `(T, 3)` | 物体位置 |
-| `objects[*].rot_aa` | `(T, 3)` | 物体旋转（轴角） |
-| `video` | binary array | RGB 视频（每帧 JPEG 压缩） |
-| `video_depth` | binary array | 深度视频（每帧 PNG 压缩） |
-
-其中 `T` 为轨迹总帧数。
-
-### 坐标系约定
-
-数据坐标系 → Three.js 坐标系的映射：
-
-```
-Three.js = (data.x,  data.z,  -data.y)
-```
-
-| 轴 | 方向 | 颜色 |
-|----|------|------|
-| X  | 右   | 红   |
-| Y  | 前（数据）→ Three.js Z 负方向 | 绿 |
-| Z  | 上（数据）→ Three.js Y 正方向 | 蓝 |
-
-### 标注文件格式
-
-标注保存为 JSON，路径为 `{ANNOTATIONS_DIR}/{trajectory_index}.json`：
-
-```json
-{
-  "trajectory_index": 0,
-  "annotations": [
-    {
-      "id": "550e8400-e29b-41d4-a716-446655440000",
-      "start": 10,
-      "end": 50,
-      "label": "grasp",
-      "color": "#ef4444"
-    }
-  ]
-}
-```
-
----
-
-## 项目结构
-
-```
+```text
 lance_viz_new/
-├── app.py                  # FastAPI 主应用
+├── app.py
+├── viz_config.yaml
 ├── core/
-│   ├── config.py           # 配置加载
-│   ├── data_loader.py      # Lance 数据集读取
-│   ├── visualization.py    # 3D 数据计算（MANO、URDF、物体）
-│   ├── curves.py           # 时间序列曲线提取
-│   ├── mano.py             # MANO 手模型推理
-│   ├── urdf_helper.py      # URDF 正向运动学
-│   └── video.py            # 视频帧解码
+│   ├── adapters.py          # 通用接口与 payload schema
+│   ├── viewer_factory.py    # adapter 工厂
+│   ├── lance_adapter.py     # Lance 实现
+│   ├── config.py
+│   ├── data_loader.py
+│   ├── visualization.py
+│   ├── curves.py
+│   ├── video.py
+│   ├── mano.py
+│   └── urdf_helper.py
 ├── frontend/
-│   ├── index.html          # 单页前端应用
-│   └── three.module.min.js # Three.js r168
+│   └── index.html
 ├── assets/
-│   ├── models/             # MANO_LEFT.pkl, MANO_RIGHT.pkl
-│   ├── objects/            # 物体 STL 模型（22 种物体）
-│   ├── operators/          # 操作人员数据
-│   ├── gestures/           # 手势分类数据
-│   └── scene.yaml          # 手势-物体映射关系
-├── annotations/            # 标注文件（本地生成，不入 Git）
+├── annotations/
 └── deploy/
-    ├── Dockerfile
-    ├── docker-compose.yml
-    ├── requirements.txt
-    └── .env                # 本地环境配置（不入 Git）
 ```
 
 ---
 
-## 依赖说明
+## 9. 如何扩展到新数据源（模板复用）
 
-**Python 版本必须使用 3.10**，原因：
+以 parquet / tactile / dex-hand 为例：
 
-- `chumpy`：依赖 `numpy` 旧 API，在 Python 3.11+ 中存在兼容性问题
-- `manotorch`：间接依赖 `chumpy`，受相同限制
-
-主要依赖版本约束：
-
-```
-numpy>=1.24.0,<1.27.0   # 上限避免 chumpy 兼容性问题
-datasets<3.2.0           # 高版本 API 变更
-pin==2.6.21              # Pinocchio 固定版本（运动学计算）
-```
+1. 在 `core/` 新建实现类（如 `parquet_adapter.py`）并实现 `ViewerAdapter`
+2. 在 `core/viewer_factory.py` 注册新的 `viewer.type`
+3. 在 `viz_config.yaml` 切换 `viewer.type`
+4. 保持 API 返回契约稳定，前端无需大改（仅按新 payload 增量适配）
 
 ---
 
-## 与采集系统集成（DexStream_Web）
+## 10. 设计原则
 
-本服务可通过 Nginx 反向代理嵌入采集系统，以 `<iframe>` 方式集成。
+- API 编排层与数据语义解耦
+- 把 notebook 专属逻辑限制在 adapter 实现层
+- 稳定前端壳与 API 契约，降低迁移成本
+- 优先优化首屏关键路径（轨迹列表、首帧、视频）
 
-Nginx 配置关键点（`/viz/` 末尾斜杠不可省略）：
-
-```nginx
-location /viz/ {
-    proxy_pass http://host.docker.internal:8868/;  # 末尾 / 用于剥离 /viz/ 前缀
-    proxy_hide_header X-Frame-Options;
-    proxy_hide_header Content-Security-Policy;
-}
-```
-
-前端 iframe：
-
-```html
-<iframe src="/viz/" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
-```
+---
