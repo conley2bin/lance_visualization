@@ -3,8 +3,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    image: lance-viz-api:latest
-    container_name: lance-viz-api
+    image: human-viz:latest
+    container_name: human-viz
     env_file:
       - .env
     ports:
