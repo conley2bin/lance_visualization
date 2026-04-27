@@ -1,4 +1,4 @@
-# lance_viz_new(FastAPI + Three.js 可视化模板)
+# 真人Lance数据可视化 (FastAPI + Three.js 可视化模板)
 
 本项目用于将 notebook 中的时序可视化逻辑，沉淀为可复用的 **后端 API + 前端交互壳**。
 当前已落地 Lance 数据集（MANO/URDF/物体/视频/曲线/标注），并支持后续扩展到 parquet、触觉力觉、灵巧手等数据源。
@@ -218,7 +218,7 @@ uvicorn app:app --host 0.0.0.0 --port 8868 --reload
 ## 8. 项目目录（当前）
 
 ```text
-lance_viz_new/
+human_viz/
 ├── app.py
 ├── viz_config.yaml
 ├── core/
