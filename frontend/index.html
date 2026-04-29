@@ -19,6 +19,13 @@ body {
 #topbar h1 { font-size: 14px; color: #1890ff; white-space: nowrap; }
 #traj-select { flex: 1; max-width: 480px; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; }
 #traj-info { color: #7f8c8d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#source-wrap { margin-left: auto; display: flex; align-items: center; gap: 5px; min-width: 340px; max-width: 520px; flex: 0 1 42%; }
+#source-path { min-width: 0; flex: 1; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; font-size: 12px; outline: none; }
+#source-path:focus { border-color: #1890ff; }
+.top-btn { padding: 4px 9px; border: 1px solid #d9dee4; background: #ffffff; color: #2c3e50; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+.top-btn:hover { border-color: #1890ff; color: #1890ff; }
+#btn-source-load { background: #1890ff; color: #fff; border-color: #1890ff; }
+#btn-source-load:hover { background: #096dd9; color: #fff; }
 
 /* ── 轨迹搜索 ── */
 #traj-search-wrap { position: relative; flex: 1; max-width: 480px; }
@@ -32,6 +39,53 @@ body {
 #traj-dropdown.open { display: block; }
 .traj-item { padding: 5px 8px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .traj-item:hover, .traj-item.active { background: #f8f9fa; color: #1890ff; }
+
+/* ── 数据源浏览弹窗 ── */
+#source-modal {
+  position: fixed; inset: 0; z-index: 1200;
+  background: rgba(17, 24, 39, 0.42);
+  display: flex; align-items: center; justify-content: center;
+}
+#source-modal.hidden { display: none; }
+.source-dialog {
+  width: min(760px, calc(100vw - 36px));
+  height: min(620px, calc(100vh - 44px));
+  background: #ffffff; border-radius: 8px; border: 1px solid #d8dee6;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.source-dialog-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid #e5e7eb;
+}
+.source-dialog-title { color: #1890ff; font-size: 12px; font-weight: bold; }
+#btn-source-close { flex: 0 0 auto; padding: 3px 8px; }
+.source-browser-bar {
+  display: flex; gap: 6px; padding: 9px 12px; border-bottom: 1px solid #eef2f7;
+}
+#browser-path { flex: 1; min-width: 0; border: 1px solid #dee2e6; border-radius: 4px; padding: 5px 8px; font-size: 12px; }
+#browser-roots {
+  display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid #eef2f7;
+}
+.root-chip {
+  border: 1px solid #d7dde5; border-radius: 999px; background: #f8fafc;
+  color: #475569; padding: 3px 9px; font-size: 11px; cursor: pointer;
+}
+.root-chip:hover { border-color: #1890ff; color: #1890ff; }
+#browser-list { flex: 1; overflow-y: auto; padding: 6px; background: #fbfcfd; }
+.browser-item {
+  display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 8px;
+  padding: 7px 8px; border-radius: 5px; cursor: pointer; font-size: 12px;
+}
+.browser-item:hover { background: #eef6ff; }
+.browser-item-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.browser-item-path { color: #94a3b8; font-size: 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.browser-select-btn {
+  border: none; border-radius: 4px; background: #1890ff; color: #fff;
+  padding: 4px 9px; font-size: 11px; cursor: pointer;
+}
+.browser-select-btn:hover { background: #096dd9; }
+.browser-empty { color: #94a3b8; padding: 22px; text-align: center; font-size: 12px; }
 
 /* ── 主体 ── */
 #main {
@@ -148,6 +202,27 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
     <div id="traj-dropdown"></div>
   </div>
   <span id="traj-info"></span>
+  <div id="source-wrap">
+    <input id="source-path" type="text" placeholder="输入 /mnt/.../*.lance 数据源路径" autocomplete="off">
+    <button class="top-btn" id="btn-source-browse">浏览</button>
+    <button class="top-btn" id="btn-source-load">加载</button>
+  </div>
+</div>
+
+<div id="source-modal" class="hidden">
+  <div class="source-dialog">
+    <div class="source-dialog-head">
+      <div class="source-dialog-title">选择 Lance 数据源</div>
+      <button class="top-btn" id="btn-source-close">关闭</button>
+    </div>
+    <div class="source-browser-bar">
+      <input id="browser-path" type="text" autocomplete="off">
+      <button class="top-btn" id="btn-browser-open">打开</button>
+      <button class="top-btn" id="btn-browser-up">上级</button>
+    </div>
+    <div id="browser-roots"></div>
+    <div id="browser-list"></div>
+  </div>
 </div>
 
 <div id="main">
@@ -236,6 +311,7 @@ import * as THREE from './static/three.module.min.js';
 // 全局状态
 // ════════════════════════════════════════════════════════
 const S = {
+  datasetSessionId: sessionStorage.getItem('humanVizDatasetSessionId') || '',
   trajIndex: null,
   totalFrames: 0,
   frameIdx: 0,
@@ -255,13 +331,34 @@ const S = {
 const $ = id => document.getElementById(id);
 async function apiFetch(url, opts) {
   const r = await fetch(url, opts);
-  if (!r.ok) throw new Error(`${r.status} ${url}`);
+  if (!r.ok) {
+    let detail = '';
+    try {
+      const err = await r.json();
+      detail = err.detail ? `: ${err.detail}` : '';
+    } catch {}
+    throw new Error(`${r.status} ${url}${detail}`);
+  }
   return r.json();
+}
+function setDatasetSessionId(sessionId) {
+  S.datasetSessionId = sessionId || '';
+  if (S.datasetSessionId && S.datasetSessionId !== 'default') {
+    sessionStorage.setItem('humanVizDatasetSessionId', S.datasetSessionId);
+  } else {
+    sessionStorage.removeItem('humanVizDatasetSessionId');
+  }
+}
+function withSession(url) {
+  if (!S.datasetSessionId) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}session_id=${encodeURIComponent(S.datasetSessionId)}`;
 }
 
 // 竞态保护：每次 refreshFrame 生成唯一序号，过时响应直接丢弃
 let _frameSeq = 0;
 let _frameAbort = null;
+let _browserState = { path: '', parent: null, roots: [] };
 function showLoading(msg) { $('loading-msg').textContent = msg; $('loading').classList.remove('hidden'); }
 function hideLoading() { $('loading').classList.add('hidden'); }
 function stopPlay() {
@@ -512,11 +609,11 @@ async function refreshFrame() {
           show_object:      $('cb-object').checked,
           show_origin:      false,
         });
-        return fetchWithSig(`./api/frame/${S.trajIndex}/${S.frameIdx}?${p}`);
+        return fetchWithSig(withSession(`./api/frame/${S.trajIndex}/${S.frameIdx}?${p}`));
       })(),
       (async () => {
         if (S.trajIndex === null || S.numCameras === 0) return null;
-        return fetchWithSig(`./api/video/${S.trajIndex}/${$('cam-select').value || 0}/${S.frameIdx}?stream=${$('stream-select').value}`)
+        return fetchWithSig(withSession(`./api/video/${S.trajIndex}/${$('cam-select').value || 0}/${S.frameIdx}?stream=${$('stream-select').value}`))
           .catch(() => null);
       })(),
     ]);
@@ -676,7 +773,7 @@ $('btn-anno-del').onclick = () => {
 $('btn-anno-save').onclick = async () => {
   if (S.trajIndex === null) return;
   try {
-    await apiFetch(`./api/annotations/${S.trajIndex}`, {
+    await apiFetch(withSession(`./api/annotations/${S.trajIndex}`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ trajectory_index: S.trajIndex, annotations: S.annotations }),
@@ -788,13 +885,153 @@ window.switchTab = name => {
 };
 
 // ════════════════════════════════════════════════════════
+// 数据源切换与浏览
+// ════════════════════════════════════════════════════════
+function clearTrajectoryVisuals() {
+  S.trajIndex = null;
+  S.totalFrames = 0;
+  S.frameIdx = 0;
+  S.numCameras = 0;
+  S.curveData = {};
+  S.annotations = [];
+  S.selAnno = null;
+  objectMeshData = null;
+  $('traj-search').value = '';
+  $('traj-info').textContent = '';
+  $('frame-slider').max = 0;
+  $('frame-slider').value = 0;
+  $('frame-label').textContent = '帧 0 / 0';
+  $('cam-select').innerHTML = '';
+  $('curve-select').innerHTML = '';
+  $('video-img').style.display = 'none';
+  $('video-none').style.display = '';
+  Object.values(OBJ).forEach(obj => { obj.visible = false; });
+  urdfMeshObjs.forEach(obj => { obj.visible = false; });
+  renderAnnoList();
+  drawTimeline();
+  drawCurve();
+}
+
+function setTrajectoryList(trajs) {
+  _allTrajs = Array.isArray(trajs) ? trajs : [];
+  if (_allTrajs.length) {
+    $('traj-search').value = _allTrajs[0].label;
+  } else {
+    clearTrajectoryVisuals();
+  }
+}
+
+async function loadDatasetFromPath(path) {
+  const lancePath = path.trim();
+  if (!lancePath) return;
+  stopPlay();
+  showLoading('切换数据源…');
+  try {
+    const result = await apiFetch('./api/dataset/load', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lance_path: lancePath, session_id: S.datasetSessionId || null }),
+    });
+    setDatasetSessionId(result.session_id || '');
+    $('source-path').value = result.lance_path || lancePath;
+    setTrajectoryList(result.trajectories || []);
+    if (_allTrajs.length) {
+      await loadTrajectory(_allTrajs[0].index);
+    } else {
+      clearTrajectoryVisuals();
+      hideLoading();
+    }
+  } catch (e) {
+    hideLoading();
+    alert(`数据源加载失败: ${e.message}`);
+  }
+}
+
+function renderBrowser(payload) {
+  _browserState = {
+    path: payload.path || '',
+    parent: payload.parent || null,
+    roots: payload.roots || [],
+  };
+  $('browser-path').value = _browserState.path;
+
+  const rootsEl = $('browser-roots');
+  rootsEl.innerHTML = '';
+  _browserState.roots.forEach(root => {
+    const chip = document.createElement('button');
+    chip.className = 'root-chip';
+    chip.textContent = root;
+    chip.onclick = () => browseDataSource(root);
+    rootsEl.appendChild(chip);
+  });
+
+  const list = $('browser-list');
+  list.innerHTML = '';
+  if (_browserState.parent) {
+    const up = document.createElement('div');
+    up.className = 'browser-item';
+    up.innerHTML = '<div>↟</div><div><div class="browser-item-name">上级目录</div><div class="browser-item-path"></div></div><div></div>';
+    up.onclick = () => browseDataSource(_browserState.parent);
+    list.appendChild(up);
+  }
+
+  const entries = payload.entries || [];
+  if (!entries.length && !_browserState.parent) {
+    list.innerHTML = '<div class="browser-empty">没有可浏览目录或 .lance 数据集</div>';
+    return;
+  }
+
+  entries.forEach(entry => {
+    const row = document.createElement('div');
+    row.className = 'browser-item';
+    const icon = entry.type === 'lance' ? '◆' : '▣';
+    row.innerHTML = `
+      <div>${icon}</div>
+      <div>
+        <div class="browser-item-name"></div>
+        <div class="browser-item-path"></div>
+      </div>
+      <div></div>
+    `;
+    row.querySelector('.browser-item-name').textContent = entry.name;
+    row.querySelector('.browser-item-path').textContent = entry.path;
+    if (entry.selectable) {
+      const btn = document.createElement('button');
+      btn.className = 'browser-select-btn';
+      btn.textContent = '选择';
+      btn.onclick = e => {
+        e.stopPropagation();
+        $('source-path').value = entry.path;
+        $('source-modal').classList.add('hidden');
+        loadDatasetFromPath(entry.path);
+      };
+      row.lastElementChild.appendChild(btn);
+    }
+    row.onclick = () => {
+      if (entry.type === 'directory' && !entry.selectable) {
+        browseDataSource(entry.path);
+      } else if (entry.selectable) {
+        $('source-path').value = entry.path;
+      }
+    };
+    list.appendChild(row);
+  });
+}
+
+async function browseDataSource(path) {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+  const payload = await apiFetch(`./api/dataset/browse${qs}`);
+  renderBrowser(payload);
+}
+
+// ════════════════════════════════════════════════════════
 // 加载轨迹
 // ════════════════════════════════════════════════════════
 async function loadTrajectory(index) {
   stopPlay();
   showLoading(`加载轨迹 ${index}…`);
   try {
-    const info = await apiFetch(`./api/trajectory/${index}/load`);
+    const info = await apiFetch(withSession(`./api/trajectory/${index}/load`));
     S.trajIndex = index;
     S.totalFrames = info.total_frames;
     S.frameIdx = 0;
@@ -805,7 +1042,7 @@ async function loadTrajectory(index) {
 
     // 加载物体网格（只加载一次）
     if (info.has_object_mesh) {
-      objectMeshData = await apiFetch(`./api/object_mesh/${index}`);
+      objectMeshData = await apiFetch(withSession(`./api/object_mesh/${index}`));
       if (objectMeshData) {
         setMesh(OBJ.objectMesh, objectMeshData);
       }
@@ -840,7 +1077,7 @@ async function loadTrajectory(index) {
     // 预取曲线数据（批量获取）
     showLoading('预取曲线数据…');
     try {
-      const allCurves = await apiFetch(`./api/curves/${index}/all`);
+      const allCurves = await apiFetch(withSession(`./api/curves/${index}/all`));
       S.curveData = allCurves;
     } catch (e) {
       console.error('批量获取曲线失败:', e);
@@ -848,7 +1085,7 @@ async function loadTrajectory(index) {
 
     // 加载已有标注
     try {
-      const saved = await apiFetch(`./api/annotations/${index}`);
+      const saved = await apiFetch(withSession(`./api/annotations/${index}`));
       S.annotations = saved.annotations || [];
       annoColorIdx = S.annotations.length;
     } catch {}
@@ -913,6 +1150,30 @@ document.addEventListener('click', e => {
   if (!$('traj-search-wrap').contains(e.target)) $('traj-dropdown').classList.remove('open');
 });
 
+$('btn-source-load').onclick = () => loadDatasetFromPath($('source-path').value);
+$('source-path').addEventListener('keydown', e => {
+  if (e.key === 'Enter') loadDatasetFromPath($('source-path').value);
+});
+$('btn-source-browse').onclick = async () => {
+  $('source-modal').classList.remove('hidden');
+  try {
+    await browseDataSource($('source-path').value.trim());
+  } catch {
+    await browseDataSource();
+  }
+};
+$('btn-source-close').onclick = () => $('source-modal').classList.add('hidden');
+$('source-modal').addEventListener('mousedown', e => {
+  if (e.target === $('source-modal')) $('source-modal').classList.add('hidden');
+});
+$('btn-browser-open').onclick = () => browseDataSource($('browser-path').value.trim());
+$('browser-path').addEventListener('keydown', e => {
+  if (e.key === 'Enter') browseDataSource($('browser-path').value.trim());
+});
+$('btn-browser-up').onclick = () => {
+  if (_browserState.parent) browseDataSource(_browserState.parent);
+};
+
 ['cam-select','stream-select'].forEach(id => $(id).onchange = refreshFrame);
 
 ['cb-mano-mesh','cb-mano-joints','cb-urdf-joints','cb-urdf-mesh','cb-object','cb-grid']
@@ -947,11 +1208,15 @@ $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ �
 (async () => {
   try {
     showLoading('加载轨迹列表…');
-    const trajs = await apiFetch('./api/trajectories');
-    _allTrajs = trajs;
-    if (trajs.length) {
-      $('traj-search').value = trajs[0].label;
-      await loadTrajectory(trajs[0].index);
+    try {
+      const current = await apiFetch(withSession('./api/dataset/current'));
+      setDatasetSessionId(current.session_id || S.datasetSessionId);
+      $('source-path').value = current.lance_path || '';
+    } catch {}
+    const trajs = await apiFetch(withSession('./api/trajectories'));
+    setTrajectoryList(trajs);
+    if (_allTrajs.length) {
+      await loadTrajectory(_allTrajs[0].index);
     } else hideLoading();
   } catch (e) { $('loading-msg').textContent = `错误: ${e.message}`; }
 })();

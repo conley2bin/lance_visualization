@@ -9,6 +9,7 @@
 
 - 提供统一的可视化 Web 服务：`FastAPI` 后端 + `Three.js` 前端
 - 将“数据源差异”限制在 adapter 层，不污染 API 编排层与前端壳
+- 支持在前端切换 Lance 数据源，并浏览容器已挂载的数据目录
 - 形成通用模板：
   - notebook-specific 逻辑（比如 Lance/MANO）放在 adapter 实现
   - 通用 API 契约与页面交互保持稳定
@@ -96,6 +97,9 @@
 ### 4.2 关键接口（API 契约）
 
 - `GET /api/trajectories`：轨迹列表
+- `GET /api/dataset/current`：当前 Lance 数据源与可浏览根目录
+- `GET /api/dataset/browse`：浏览容器已挂载的数据目录
+- `POST /api/dataset/load`：切换 Lance 数据源
 - `GET /api/trajectory/{index}`：轨迹元信息
 - `GET /api/trajectory/{index}/load`：轨迹加载信息（总帧数、曲线选项、可用资源）
 - `GET /api/frame/{index}/{frame_idx}`：3D 帧数据
@@ -154,6 +158,10 @@
 4. 拉取首帧 `/api/frame/...` 与视频 `/api/video/...`
 5. 每次切帧只刷新 frame/video；其中物体仅更新 `object_transform`，不重复拉取 mesh
 6. 用户拖动帧轴时增量刷新 frame/video
+
+右上角数据源输入框支持直接输入容器内可访问的 `.lance` 路径，也支持通过“浏览”选择已挂载目录中的 `.lance` 数据集。浏览范围默认包含 `/data` 和 `/mnt` 下名称以 `nas` 开头的目录；如需显式指定，可设置环境变量 `DATA_BROWSER_ROOTS`，多个路径用 `:` 分隔。
+
+每个前端页面会通过 `sessionStorage` 持有独立的 `session_id`。切换数据源后，后端会为该页面维护独立的 adapter 和轨迹 LRU 缓存，因此多个页面可以同时查看不同 Lance 数据源。标注文件会按 Lance 路径 hash 分目录保存，避免不同数据源的相同轨迹索引互相覆盖。
 
 ### 5.3 渲染策略
 
