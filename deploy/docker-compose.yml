@@ -16,8 +16,6 @@ services:
       - ../frontend:/app/frontend:ro
       # 应用配置（挂载到 config.py 首选查找路径）
       - ../viz_config.yaml:/data/viz_config.yaml:ro
-      # 标注数据目录（可读写，持久化到宿主机）
-      - ${HOST_ANNOTATIONS_PATH:-../annotations}:/app/annotations
       # 资源与数据挂载
       - ${HOST_ASSETS_PATH:-../assets}:/app/assets:ro
       - ${HOST_DATA_PATH}:/data:ro

@@ -21,10 +21,6 @@ paths:
   # 通常从 assets/objects/ 自动读取，一般无需填写
   object_mesh: ""
 
-  # 标注文件保存目录
-  # Docker 环境下该目录需挂载为可读写卷
-  annotations_dir: /app/annotations
-
   # 资源根目录（assets/ 所在的父目录）
   # Docker 环境下通常为 /app，本地运行时为项目根目录
   project_root: /app

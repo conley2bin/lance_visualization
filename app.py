@@ -7,9 +7,7 @@ from pathlib import Path
 from collections import OrderedDict
 
 import copy
-import hashlib
 import os
-import json
 import time
 import uuid
 
@@ -20,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from core.adapters import ViewerAdapter
-from core.config import get_annotations_dir, get_project_root, load_config
+from core.config import get_project_root, load_config
 from core.viewer_factory import create_viewer_adapter
 
 # ---------------------------------------------------------------------------
@@ -62,10 +60,9 @@ _sessions: OrderedDict[str, dict] = OrderedDict()
 
 @app.on_event("startup")
 def startup():
-    global _config, _project_root, _ANNO_DIR
+    global _config, _project_root
     _config = load_config()
     _project_root = get_project_root(_config)
-    _ANNO_DIR = get_annotations_dir(_config)
     session = _create_session(_config, session_id=_DEFAULT_SESSION_ID)
     adapter = session["adapter"]
     print(f"[startup] viewer adapter: {_config.get('viewer', {}).get('type', 'lance')}")
@@ -229,20 +226,6 @@ def _make_dataset_response(session: dict) -> dict:
         "viewer_type": config.get("viewer", {}).get("type", "lance"),
         "browser_roots": [str(root) for root in _get_browser_roots()],
     }
-
-
-def _dataset_annotation_key(session: dict) -> str:
-    lance_path = session["config"].get("paths", {}).get("lance_dataset", "")
-    return hashlib.sha1(lance_path.encode("utf-8")).hexdigest()[:16]
-
-
-def _get_annotation_path(index: int, session_id: str | None = None, *, for_write: bool = False) -> Path:
-    session = _get_session(session_id)
-    path = _ANNO_DIR / "datasets" / _dataset_annotation_key(session) / f"{index}.json"
-    legacy = _ANNO_DIR / f"{index}.json"
-    if not for_write and session["id"] == _DEFAULT_SESSION_ID and not path.exists() and legacy.exists():
-        return legacy
-    return path
 
 
 # ---------------------------------------------------------------------------
@@ -444,40 +427,3 @@ def get_curve(index: int, curve_name: str, session_id: str | None = None):
         raise HTTPException(status_code=404, detail=f"曲线 '{curve_name}' 不存在")
     return {"name": curve_name, "data": data}
 
-
-# ---------------------------------------------------------------------------
-# 时间轴标注
-# ---------------------------------------------------------------------------
-
-_ANNO_DIR: Path = Path("/app/annotations")  # 启动时由 startup() 覆盖
-
-
-class Annotation(BaseModel):
-    id: str
-    start: int
-    end: int
-    label: str
-    color: str = "#ef4444"
-
-
-class AnnotationPayload(BaseModel):
-    trajectory_index: int
-    annotations: list[Annotation]
-
-
-@app.get("/api/annotations/{index}")
-def get_annotations(index: int, session_id: str | None = None):
-    """读取指定轨迹的标注文件。"""
-    path = _get_annotation_path(index, session_id)
-    if not path.exists():
-        return {"trajectory_index": index, "annotations": []}
-    return json.loads(path.read_text())
-
-
-@app.post("/api/annotations/{index}")
-def save_annotations(index: int, payload: AnnotationPayload, session_id: str | None = None):
-    """保存指定轨迹的标注到 JSON 文件。"""
-    path = _get_annotation_path(index, session_id, for_write=True)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(payload.model_dump_json(indent=2))
-    return {"ok": True}

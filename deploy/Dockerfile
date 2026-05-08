@@ -46,8 +46,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY app.py .
 COPY core ./core
 
-RUN mkdir -p /data/annotations
-
 EXPOSE 8868
 
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8868"]

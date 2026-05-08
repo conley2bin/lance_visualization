@@ -55,7 +55,6 @@ def _default_config() -> dict:
             ),
             "urdf": "",
             "object_mesh": "",
-            "annotations_dir": os.environ.get("ANNOTATIONS_DIR", "/app/annotations"),
             "project_root": os.environ.get("PROJECT_ROOT", "/app"),
         },
         "defaults": {
@@ -66,14 +65,6 @@ def _default_config() -> dict:
             "hand": "right",
         },
     }
-
-
-def get_annotations_dir(config: dict) -> Path:
-    """返回标注文件保存目录，优先读取配置文件，其次环境变量。"""
-    val = os.environ.get("ANNOTATIONS_DIR")
-    if val:
-        return Path(val)
-    return Path(config.get("paths", {}).get("annotations_dir", "/app/annotations"))
 
 
 def get_project_root(config: dict = None) -> Path:

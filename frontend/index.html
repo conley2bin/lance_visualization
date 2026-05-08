@@ -140,38 +140,12 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
 #video-img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
 #video-none { color: #bfbfbf; font-size: 12px; }
 
-/* ── 底部：标注时间轴 + 曲线图 ── */
+/* ── 底部：曲线图 ── */
 #bottom {
   grid-column: 2 / 4; grid-row: 2;
   background: #ffffff; border-radius: 6px; border: 1px solid #dee2e6;
-  display: flex; flex-direction: column; overflow: hidden;
+  overflow: hidden;
 }
-#bottom-tabs { display: flex; border-bottom: 1px solid #dee2e6; flex-shrink: 0; }
-.tab-btn {
-  padding: 5px 14px; background: none; border: none; color: #7f8c8d;
-  cursor: pointer; font-size: 12px; border-bottom: 2px solid transparent;
-}
-.tab-btn.active { color: #1890ff; border-bottom-color: #1890ff; }
-#tab-anno, #tab-curve { flex: 1; overflow: hidden; }
-#tab-curve { display: none; }
-
-/* 标注时间轴 */
-#anno-wrap { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; height: 100%; }
-#timeline-canvas { width: 100%; height: 52px; cursor: crosshair; border-radius: 4px; }
-#anno-controls { display: flex; gap: 6px; align-items: center; }
-#anno-label-input { flex: 1; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 3px 8px; font-size: 12px; }
-.anno-btn { padding: 4px 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
-#btn-anno-add { background: #059669; color: #fff; }
-#btn-anno-del { background: #c0392b; color: #fff; }
-#btn-anno-save { background: #1890ff; color: #fff; }
-.anno-btn:hover { filter: brightness(1.15); }
-#anno-list { overflow-x: auto; display: flex; gap: 6px; flex-wrap: nowrap; font-size: 11px; }
-.anno-tag {
-  background: #e8eaed; border-radius: 3px; padding: 2px 8px;
-  white-space: nowrap; cursor: pointer; border: 1px solid transparent;
-}
-.anno-tag:hover { border-color: #1890ff; }
-.anno-tag.selected { border-color: #1890ff; background: #e6f7ff; }
 
 /* 曲线图 */
 #curve-wrap { padding: 8px 10px; height: 100%; display: flex; flex-direction: column; gap: 4px; }
@@ -278,28 +252,10 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
     </div>
   </div>
 
-  <!-- 底部：标注 + 曲线 -->
+  <!-- 底部：曲线 -->
   <div id="bottom">
-    <div id="bottom-tabs">
-      <button class="tab-btn active" id="tab-btn-anno" onclick="switchTab('anno')">🏷 时间轴标注</button>
-      <button class="tab-btn" id="tab-btn-curve" onclick="switchTab('curve')">📈 数据曲线</button>
-    </div>
-    <div id="tab-anno">
-      <div id="anno-wrap">
-        <canvas id="timeline-canvas"></canvas>
-        <div id="anno-controls">
-          <input id="anno-label-input" type="text" placeholder="标注标签…" value="grasp">
-          <button class="anno-btn" id="btn-anno-add" title="在当前帧范围添加标注">+ 添加标注</button>
-          <button class="anno-btn" id="btn-anno-del">🗑 删除选中</button>
-          <button class="anno-btn" id="btn-anno-save">💾 保存</button>
-        </div>
-        <div id="anno-list"></div>
-      </div>
-    </div>
-    <div id="tab-curve">
-      <div id="curve-wrap">
-        <canvas id="curve-canvas"></canvas>
-      </div>
+    <div id="curve-wrap">
+      <canvas id="curve-canvas"></canvas>
     </div>
   </div>
 </div>
@@ -317,12 +273,9 @@ const S = {
   frameIdx: 0,
   numCameras: 0,
   curveData: {},
-  annotations: [],      // [{id,start,end,label}]
-  selAnno: null,        // 选中的标注 id
   playTimer: null,
   _playing: false,
   playFps: 15,
-  annoRange: null,      // 正在拖拽的标注区间 {start,end}
 };
 
 // ════════════════════════════════════════════════════════
@@ -637,176 +590,6 @@ async function refreshFrame() {
 }
 
 // ════════════════════════════════════════════════════════
-// 标注时间轴
-// ════════════════════════════════════════════════════════
-const tlCanvas = $('timeline-canvas');
-const tlCtx = tlCanvas.getContext('2d');
-const ANNO_COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#a855f7','#ec4899'];
-let annoColorIdx = 0;
-function nextColor() { return ANNO_COLORS[(annoColorIdx++) % ANNO_COLORS.length]; }
-
-function drawTimeline() {
-  const W = tlCanvas.width, H = tlCanvas.height;
-  tlCtx.clearRect(0, 0, W, H);
-
-  // 背景
-  tlCtx.fillStyle = '#ecf0f1';
-  tlCtx.fillRect(0, 0, W, H);
-
-  if (!S.totalFrames) return;
-  const f2x = f => f / S.totalFrames * W;
-
-  // 标注区域
-  S.annotations.forEach(a => {
-    const x1 = f2x(a.start), x2 = f2x(a.end);
-    tlCtx.fillStyle = (a.id === S.selAnno) ? lighten(a.color, 40) : a.color;
-    tlCtx.globalAlpha = 0.55;
-    tlCtx.fillRect(x1, 8, x2 - x1, H - 16);
-    tlCtx.globalAlpha = 1;
-    tlCtx.strokeStyle = a.color;
-    tlCtx.lineWidth = 1.5;
-    tlCtx.strokeRect(x1, 8, x2 - x1, H - 16);
-    // 标签
-    tlCtx.fillStyle = '#fff';
-    tlCtx.font = '11px sans-serif';
-    tlCtx.fillText(a.label, x1 + 3, H / 2 + 4);
-  });
-
-  // 拖拽预览
-  if (S.annoRange) {
-    const x1 = f2x(Math.min(S.annoRange.start, S.annoRange.end));
-    const x2 = f2x(Math.max(S.annoRange.start, S.annoRange.end));
-    tlCtx.fillStyle = 'rgba(255,255,255,0.12)';
-    tlCtx.fillRect(x1, 8, x2 - x1, H - 16);
-    tlCtx.strokeStyle = '#fff';
-    tlCtx.lineWidth = 1;
-    tlCtx.setLineDash([4, 3]);
-    tlCtx.strokeRect(x1, 8, x2 - x1, H - 16);
-    tlCtx.setLineDash([]);
-  }
-
-  // 刻度（每 10 帧一小格）
-  tlCtx.fillStyle = '#b2bec3';
-  const step = Math.max(1, Math.floor(S.totalFrames / 50));
-  for (let f = 0; f <= S.totalFrames; f += step) {
-    const x = f2x(f);
-    tlCtx.fillRect(x, H - 6, 1, 6);
-  }
-
-  // 当前帧线
-  const cx = f2x(S.frameIdx);
-  tlCtx.strokeStyle = '#1890ff';
-  tlCtx.lineWidth = 2;
-  tlCtx.beginPath();
-  tlCtx.moveTo(cx, 0); tlCtx.lineTo(cx, H);
-  tlCtx.stroke();
-}
-
-function lighten(hex, amt) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.min(255, (n >> 16) + amt);
-  const g = Math.min(255, ((n >> 8) & 0xff) + amt);
-  const b = Math.min(255, (n & 0xff) + amt);
-  return `#${((r<<16)|(g<<8)|b).toString(16).padStart(6,'0')}`;
-}
-
-// timeline 事件
-let tlDrag = null;
-tlCanvas.addEventListener('mousedown', e => {
-  const x = e.offsetX * (tlCanvas.width / tlCanvas.offsetWidth);
-  const f = Math.round(x / tlCanvas.width * S.totalFrames);
-  // 点击选中已有标注
-  const hit = S.annotations.find(a => f >= a.start && f <= a.end);
-  if (hit) { S.selAnno = hit.id; renderAnnoList(); drawTimeline(); return; }
-  S.selAnno = null;
-  tlDrag = { start: f };
-  S.annoRange = { start: f, end: f };
-});
-tlCanvas.addEventListener('mousemove', e => {
-  const x = e.offsetX * (tlCanvas.width / tlCanvas.offsetWidth);
-  const f = Math.round(x / tlCanvas.width * S.totalFrames);
-  if (tlDrag) {
-    S.annoRange = { start: tlDrag.start, end: f };
-    drawTimeline(); return;
-  }
-  // 拖拽帧
-  if (e.buttons === 1 && !tlDrag) {
-    S.frameIdx = Math.max(0, Math.min(S.totalFrames - 1, f));
-    $('frame-slider').value = S.frameIdx;
-    refreshFrame();
-  }
-});
-tlCanvas.addEventListener('mouseup', e => {
-  if (!tlDrag) return;
-  const x = e.offsetX * (tlCanvas.width / tlCanvas.offsetWidth);
-  const f = Math.round(x / tlCanvas.width * S.totalFrames);
-  const start = Math.min(tlDrag.start, f), end = Math.max(tlDrag.start, f);
-  if (end - start >= 2) {
-    // 若没有正在拖拽，则点击即跳帧
-  } else {
-    S.frameIdx = Math.max(0, Math.min(S.totalFrames - 1, start));
-    $('frame-slider').value = S.frameIdx;
-    refreshFrame();
-  }
-  tlDrag = null; S.annoRange = null;
-  drawTimeline();
-});
-
-// 添加标注
-$('btn-anno-add').onclick = () => {
-  if (!S.totalFrames) return;
-  const label = $('anno-label-input').value.trim() || '标注';
-  // 默认以当前帧为中心创建一个范围
-  const half = Math.max(1, Math.floor(S.totalFrames * 0.05));
-  const start = Math.max(0, S.frameIdx - half);
-  const end = Math.min(S.totalFrames - 1, S.frameIdx + half);
-  S.annotations.push({ id: crypto.randomUUID(), start, end, label, color: nextColor() });
-  renderAnnoList(); drawTimeline();
-};
-
-$('btn-anno-del').onclick = () => {
-  if (!S.selAnno) return;
-  S.annotations = S.annotations.filter(a => a.id !== S.selAnno);
-  S.selAnno = null; renderAnnoList(); drawTimeline();
-};
-
-$('btn-anno-save').onclick = async () => {
-  if (S.trajIndex === null) return;
-  try {
-    await apiFetch(withSession(`./api/annotations/${S.trajIndex}`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ trajectory_index: S.trajIndex, annotations: S.annotations }),
-    });
-    $('btn-anno-save').textContent = '✓ 已保存';
-    setTimeout(() => { $('btn-anno-save').textContent = '💾 保存'; }, 1500);
-  } catch (e) { alert('保存失败: ' + e.message); }
-};
-
-function renderAnnoList() {
-  const list = $('anno-list');
-  list.innerHTML = '';
-  S.annotations.forEach(a => {
-    const tag = document.createElement('div');
-    tag.className = 'anno-tag' + (a.id === S.selAnno ? ' selected' : '');
-    tag.style.borderLeftColor = a.color;
-    tag.style.borderLeftWidth = '3px';
-    tag.style.borderLeftStyle = 'solid';
-    tag.textContent = `${a.label} [${a.start}–${a.end}]`;
-    tag.onclick = () => { S.selAnno = a.id; renderAnnoList(); drawTimeline(); };
-    list.appendChild(tag);
-  });
-}
-
-// timeline canvas 尺寸
-const tlRo = new ResizeObserver(() => {
-  tlCanvas.width = tlCanvas.offsetWidth;
-  tlCanvas.height = tlCanvas.offsetHeight;
-  drawTimeline();
-});
-tlRo.observe(tlCanvas);
-
-// ════════════════════════════════════════════════════════
 // 曲线图
 // ════════════════════════════════════════════════════════
 const CURVE_COLORS = ['#60a5fa','#34d399','#f87171','#fbbf24','#a78bfa','#fb923c','#38bdf8'];
@@ -870,21 +653,6 @@ const cvRo = new ResizeObserver(() => {
 cvRo.observe($('curve-canvas'));
 
 // ════════════════════════════════════════════════════════
-// Tab 切换
-// ════════════════════════════════════════════════════════
-window.switchTab = name => {
-  ['anno','curve'].forEach(t => {
-    $(`tab-${t}`).style.display = t === name ? 'block' : 'none';
-    $(`tab-btn-${t}`).classList.toggle('active', t === name);
-  });
-  if (name === 'curve') {
-    const c = $('curve-canvas');
-    c.width = c.offsetWidth; c.height = c.offsetHeight;
-    drawCurve();
-  }
-};
-
-// ════════════════════════════════════════════════════════
 // 数据源切换与浏览
 // ════════════════════════════════════════════════════════
 function clearTrajectoryVisuals() {
@@ -893,8 +661,6 @@ function clearTrajectoryVisuals() {
   S.frameIdx = 0;
   S.numCameras = 0;
   S.curveData = {};
-  S.annotations = [];
-  S.selAnno = null;
   objectMeshData = null;
   $('traj-search').value = '';
   $('traj-info').textContent = '';
@@ -907,8 +673,6 @@ function clearTrajectoryVisuals() {
   $('video-none').style.display = '';
   Object.values(OBJ).forEach(obj => { obj.visible = false; });
   urdfMeshObjs.forEach(obj => { obj.visible = false; });
-  renderAnnoList();
-  drawTimeline();
   drawCurve();
 }
 
@@ -1037,8 +801,6 @@ async function loadTrajectory(index) {
     S.frameIdx = 0;
     S.numCameras = info.num_cameras;
     S.curveData = {};
-    S.annotations = [];
-    S.selAnno = null;
 
     // 加载物体网格（只加载一次）
     if (info.has_object_mesh) {
@@ -1083,14 +845,6 @@ async function loadTrajectory(index) {
       console.error('批量获取曲线失败:', e);
     }
 
-    // 加载已有标注
-    try {
-      const saved = await apiFetch(withSession(`./api/annotations/${index}`));
-      S.annotations = saved.annotations || [];
-      annoColorIdx = S.annotations.length;
-    } catch {}
-
-    renderAnnoList();
     await refreshFrame();
   } finally {
     hideLoading();

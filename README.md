@@ -1,7 +1,7 @@
 # 真人Lance数据可视化 (FastAPI + Three.js 可视化模板)
 
 本项目用于将 notebook 中的时序可视化逻辑，沉淀为可复用的 **后端 API + 前端交互壳**。
-当前已落地 Lance 数据集（MANO/URDF/物体/视频/曲线/标注），并支持后续扩展到 parquet、触觉力觉、灵巧手等数据源。
+当前已落地 Lance 数据集（MANO/URDF/物体/视频/曲线），并支持后续扩展到 parquet、触觉力觉、灵巧手等数据源。
 
 ---
 
@@ -35,7 +35,6 @@
 │ - 3D 场景渲染                      │
 │ - 视频面板                          │
 │ - 曲线面板                          │
-│ - 标注面板                          │
 └──────────────┬─────────────────────┘
                │ HTTP JSON
 ┌──────────────▼─────────────────────┐
@@ -43,7 +42,6 @@
 │ app.py                              │
 │ - 路由与请求编排                    │
 │ - 轨迹状态 LRU 缓存                 │
-│ - 标注文件读写                      │
 └──────────────┬─────────────────────┘
                │ Protocol
 ┌──────────────▼─────────────────────┐
@@ -76,7 +74,7 @@
 
 1. **配置层**：`core/config.py`
    - 读取 `viz_config.yaml`
-   - 解析数据路径、资源目录、标注目录等
+   - 解析数据路径与资源目录等
 
 2. **Adapter 抽象层**：`core/adapters.py`
    - 定义 `ViewerAdapter` Protocol
@@ -89,7 +87,7 @@
    - 按 `viewer.type` 创建对应 adapter
 
 5. **API 编排层**：`app.py`
-   - 只做路由编排、缓存管理、标注持久化
+   - 只做路由编排与缓存管理
    - 不直接耦合 Lance/MANO 具体实现
 
 ---
@@ -108,7 +106,6 @@
 - `GET /api/curves/{index}`：曲线名列表
 - `GET /api/curves/{index}/all`：全部曲线值
 - `GET /api/curve/{index}/{curve_name}`：单曲线值
-- `GET/POST /api/annotations/{index}`：标注读写
 
 ---
 
@@ -148,7 +145,7 @@
 - 顶部控制：轨迹搜索、轨迹切换、播放控制
 - 左侧/中间：3D 场景（Three.js）
 - 右侧：视频帧
-- 底部：曲线图 + 标注时间轴
+- 底部：曲线图
 
 ### 5.2 核心流程
 
@@ -161,13 +158,12 @@
 
 右上角数据源输入框支持直接输入容器内可访问的 `.lance` 路径，也支持通过“浏览”选择已挂载目录中的 `.lance` 数据集。浏览范围默认包含 `/data` 和 `/mnt` 下名称以 `nas` 开头的目录；如需显式指定，可设置环境变量 `DATA_BROWSER_ROOTS`，多个路径用 `:` 分隔。
 
-每个前端页面会通过 `sessionStorage` 持有独立的 `session_id`。切换数据源后，后端会为该页面维护独立的 adapter 和轨迹 LRU 缓存，因此多个页面可以同时查看不同 Lance 数据源。标注文件会按 Lance 路径 hash 分目录保存，避免不同数据源的相同轨迹索引互相覆盖。
+每个前端页面会通过 `sessionStorage` 持有独立的 `session_id`。切换数据源后，后端会为该页面维护独立的 adapter 和轨迹 LRU 缓存，因此多个页面可以同时查看不同 Lance 数据源。
 
 ### 5.3 渲染策略
 
 - Three.js 负责 3D mesh 与 points 可视化
 - 曲线面板使用 canvas 绘制
-- 标注面板支持区间编辑并回写后端 JSON
 
 ---
 
@@ -183,7 +179,6 @@ paths:
   mano_model: /app/assets/models/MANO_RIGHT.pkl
   urdf: ""
   object_mesh: ""
-  annotations_dir: /app/annotations
   project_root: /app
 
 viewer:
@@ -243,7 +238,6 @@ human_viz/
 ├── frontend/
 │   └── index.html
 ├── assets/
-├── annotations/
 └── deploy/
 ```
 
