@@ -71,22 +71,11 @@ class TrajectoryState:
         obj_paths = [
             objects_dir / matched / f"{matched}_aligned.stl",
             objects_dir / f"{matched}_aligned.stl",
-            objects_dir / matched / f"{matched}.stl",
-            objects_dir / f"{matched}.stl",
         ]
         for obj_path in obj_paths:
             if obj_path.exists():
                 try:
                     mesh = trimesh.load(str(obj_path))
-                    # 若加载的是 _aligned 版本，但原始 STL 是轴对齐的（cube/cuboid 类），
-                    # 则改用原始版本——旋转数据是基于轴对齐姿态定义的
-                    if "_aligned" in obj_path.name:
-                        orig_path = objects_dir / matched / f"{matched}.stl"
-                        if orig_path.exists():
-                            orig = trimesh.load(str(orig_path))
-                            unique_normals = np.unique(np.round(np.array(orig.face_normals), 1), axis=0)
-                            if all(sum(abs(n) > 0.9 for n in row) == 1 for row in unique_normals):
-                                mesh = orig
                     mesh.vertices = mesh.vertices * 0.001  # mm → m
                     self.object_mesh = {
                         "vertices": np.asarray(mesh.vertices, dtype=np.float32),
