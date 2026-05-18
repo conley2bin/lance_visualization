@@ -617,6 +617,19 @@ async function refreshFrame() {
 // 曲线图
 // ════════════════════════════════════════════════════════
 const CURVE_COLORS = ['#60a5fa','#34d399','#f87171','#fbbf24','#a78bfa','#fb923c','#38bdf8'];
+const CURVE_PAD = { l: 42, r: 10, t: 6, b: 20 };
+
+function frameFromCurveEvent(e) {
+  const cvs = $('curve-canvas');
+  const rect = cvs.getBoundingClientRect();
+  const W = cvs.width;
+  const iW = Math.max(1, W - CURVE_PAD.l - CURVE_PAD.r);
+  const x = Math.max(CURVE_PAD.l, Math.min(W - CURVE_PAD.r, e.clientX - rect.left));
+  const ratio = (x - CURVE_PAD.l) / iW;
+  const maxFrame = Math.max(0, S.totalFrames - 1);
+  return Math.max(0, Math.min(maxFrame, Math.round(ratio * maxFrame)));
+}
+
 function drawCurve() {
   const cvs = $('curve-canvas');
   const ctx = cvs.getContext('2d');
@@ -634,7 +647,7 @@ function drawCurve() {
   const minV = Math.min(...allVals), maxV = Math.max(...allVals);
   const range = maxV - minV || 1;
 
-  const pad = { l: 42, r: 10, t: 6, b: 20 };
+  const pad = CURVE_PAD;
   const iW = W - pad.l - pad.r, iH = H - pad.t - pad.b;
 
   const f2x = f => pad.l + f / (S.totalFrames - 1) * iW;
@@ -675,6 +688,53 @@ const cvRo = new ResizeObserver(() => {
   drawCurve();
 });
 cvRo.observe($('curve-canvas'));
+
+// 曲线画布拖动进度条
+let curveDrag = false;
+let curvePointerId = null;
+
+async function updateFrameFromCurveEvent(e) {
+  if (!S.totalFrames) return;
+  const nextFrame = frameFromCurveEvent(e);
+  if (nextFrame === S.frameIdx) return;
+  stopPlay();
+  S.frameIdx = nextFrame;
+  $('frame-slider').value = S.frameIdx;
+  await refreshFrame();
+}
+
+$('curve-canvas').addEventListener('pointerdown', async e => {
+  if (e.button !== 0 || !S.totalFrames) return;
+  e.preventDefault();
+  curveDrag = true;
+  curvePointerId = e.pointerId ?? null;
+  if (curvePointerId !== null) $('curve-canvas').setPointerCapture?.(curvePointerId);
+  await updateFrameFromCurveEvent(e);
+});
+
+window.addEventListener('pointermove', async e => {
+  if (!curveDrag) return;
+  if (curvePointerId !== null && e.pointerId !== undefined && e.pointerId !== curvePointerId) return;
+  e.preventDefault();
+  await updateFrameFromCurveEvent(e);
+});
+
+window.addEventListener('pointerup', e => {
+  if (!curveDrag) return;
+  if (curvePointerId !== null && e.pointerId !== curvePointerId) return;
+  e.preventDefault();
+  if (curvePointerId !== null && $('curve-canvas').hasPointerCapture?.(curvePointerId)) {
+    $('curve-canvas').releasePointerCapture(curvePointerId);
+  }
+  curveDrag = false;
+  curvePointerId = null;
+});
+
+window.addEventListener('pointercancel', e => {
+  if (curvePointerId !== null && e.pointerId !== curvePointerId) return;
+  curveDrag = false;
+  curvePointerId = null;
+});
 
 // ════════════════════════════════════════════════════════
 // 数据源切换与浏览
