@@ -122,3 +122,58 @@ class ViewerAdapter(Protocol):
 
     def get_all_curve_data(self, state: Any) -> dict[str, list[float]]:
         ...
+
+
+class EmptyViewerAdapter:
+    """未选择 Lance 数据源时的占位 adapter。"""
+
+    @property
+    def total_items(self) -> int:
+        return 0
+
+    def list_items(self) -> list[TrajectoryListItem]:
+        return []
+
+    def get_item_info(self, index: int) -> TrajectoryInfo:
+        raise RuntimeError("请先选择 Lance 数据源")
+
+    def build_state(self, index: int) -> Any:
+        raise RuntimeError("请先选择 Lance 数据源")
+
+    def get_load_payload(self, index: int, state: Any) -> LoadPayload:
+        raise RuntimeError("请先选择 Lance 数据源")
+
+    def get_frame_payload(
+        self,
+        state: Any,
+        frame_idx: int,
+        *,
+        show_mano_mesh: bool = True,
+        show_mano_joints: bool = False,
+        show_urdf_joints: bool = False,
+        show_urdf_mesh: bool = False,
+        show_object: bool = True,
+        show_origin: bool = False,
+    ) -> FramePayload:
+        raise RuntimeError("请先选择 Lance 数据源")
+
+    def get_object_mesh_payload(self, state: Any) -> MeshPayload | None:
+        raise RuntimeError("请先选择 Lance 数据源")
+
+    def get_video_frame_payload(
+        self,
+        index: int,
+        cam_idx: int,
+        frame_idx: int,
+        stream: str = "color",
+    ) -> dict[str, Any] | None:
+        raise RuntimeError("请先选择 Lance 数据源")
+
+    def get_curve_options(self, state: Any) -> list[str]:
+        raise RuntimeError("请先选择 Lance 数据源")
+
+    def get_curve_data(self, state: Any, curve_name: str) -> list[float] | None:
+        raise RuntimeError("请先选择 Lance 数据源")
+
+    def get_all_curve_data(self, state: Any) -> dict[str, list[float]]:
+        raise RuntimeError("请先选择 Lance 数据源")

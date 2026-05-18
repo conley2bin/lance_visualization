@@ -14,8 +14,6 @@ services:
       - ../app.py:/app/app.py:ro
       - ../core:/app/core:ro
       - ../frontend:/app/frontend:ro
-      # 应用配置（挂载到 config.py 首选查找路径）
-      - ../viz_config.yaml:/data/viz_config.yaml:ro
       # 资源与数据挂载
       - ${HOST_ASSETS_PATH:-../assets}:/app/assets:ro
       - ${HOST_DATA_PATH}:/data:ro

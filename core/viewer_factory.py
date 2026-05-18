@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .adapters import ViewerAdapter
+from .adapters import EmptyViewerAdapter, ViewerAdapter
 from .lance_adapter import LanceViewerAdapter
 
 
@@ -14,6 +14,10 @@ def create_viewer_adapter(config: dict, project_root: Path) -> ViewerAdapter:
     lance_path = config["paths"]["lance_dataset"]
     mano_model_path = config["paths"]["mano_model"]
     hand = config.get("defaults", {}).get("hand", "right")
+
+    if not lance_path:
+        print("[startup] 未选择 Lance 数据集，使用空 adapter")
+        return EmptyViewerAdapter()
 
     print(f"[startup] 加载 Lance 数据集: {lance_path}")
     return LanceViewerAdapter(

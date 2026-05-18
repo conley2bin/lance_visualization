@@ -6,8 +6,8 @@
 # 注意：环境变量 LANCE_DATASET / MANO_MODEL_PATH 优先级高于本文件。
 
 paths:
-  # Lance 数据集路径（必填）
-  lance_dataset: /mnt/nas-222-project/mocap/releases/v0.5/trajectories_preprocessed.lance
+  # Lance 数据集路径（可留空；启动后在前端下拉或手动选择）
+  lance_dataset: ""
 
   # MANO 手模型文件路径（.pkl 格式）
   # 使用左手数据集时改为 MANO_LEFT.pkl

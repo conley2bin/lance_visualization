@@ -63,20 +63,29 @@ def startup():
     global _config, _project_root
     _config = load_config()
     _project_root = get_project_root(_config)
-    session = _create_session(_config, session_id=_DEFAULT_SESSION_ID)
+    session = _create_session(_build_empty_dataset_config(_config), session_id=_DEFAULT_SESSION_ID)
     adapter = session["adapter"]
     print(f"[startup] viewer adapter: {_config.get('viewer', {}).get('type', 'lance')}")
     print(f"[startup] 共 {adapter.total_items} 条轨迹")
 
     # 预加载默认轨迹到缓存，优化首次访问速度
     default_index = _config.get("defaults", {}).get("trajectory_index", 0)
-    print(f"[startup] 预加载默认轨迹 {default_index}")
-    _get_state(default_index, session_id=_DEFAULT_SESSION_ID)
-    print(f"[startup] 预加载完成")
+    if adapter.total_items > 0:
+        print(f"[startup] 预加载默认轨迹 {default_index}")
+        _get_state(default_index, session_id=_DEFAULT_SESSION_ID)
+        print(f"[startup] 预加载完成")
+    else:
+        print("[startup] 默认不加载任何 Lance 数据集")
 
 
 def _clone_config(config: dict) -> dict:
     return copy.deepcopy(config)
+
+
+def _build_empty_dataset_config(config: dict) -> dict:
+    empty_config = _clone_config(config)
+    empty_config.setdefault("paths", {})["lance_dataset"] = ""
+    return empty_config
 
 
 def _create_session(config: dict, session_id: str | None = None) -> dict:
@@ -117,7 +126,7 @@ def _cleanup_sessions() -> None:
 def _get_session(session_id: str | None = None) -> dict:
     sid = session_id or _DEFAULT_SESSION_ID
     if sid not in _sessions:
-        base_config = _config or load_config()
+        base_config = _build_empty_dataset_config(_config or load_config())
         _create_session(base_config, session_id=sid)
 
     session = _sessions[sid]
@@ -228,6 +237,28 @@ def _make_dataset_response(session: dict) -> dict:
     }
 
 
+def _get_database_dsn() -> str:
+    dsn = os.getenv("DATABASE_URL") or os.getenv("DEXSTREAM_DATABASE_URL")
+    if dsn:
+        return dsn
+
+    host = os.getenv("DB_HOST")
+    user = os.getenv("DB_USER")
+    password = os.getenv("DB_PASSWORD")
+    db_name = os.getenv("DB_NAME")
+    port = os.getenv("DB_PORT", "15432")
+    if host and user and password and db_name:
+        return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+
+    raise RuntimeError("未配置数据库连接，请设置 DATABASE_URL 或 DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD")
+
+
+def _ensure_dataset_selected(session: dict) -> None:
+    lance_path = session["config"].get("paths", {}).get("lance_dataset", "")
+    if not lance_path:
+        raise HTTPException(status_code=400, detail="请先选择 Lance 数据源")
+
+
 # ---------------------------------------------------------------------------
 # 端点
 # ---------------------------------------------------------------------------
@@ -238,11 +269,79 @@ class DatasetLoadPayload(BaseModel):
     session_id: str | None = None
 
 
+class RecentDatasetItem(BaseModel):
+    dataset_path: str
+    dataset_name: str
+    source_schema: str | None = None
+    created_at: str | None = None
+
+
+class RecentDatasetsResponse(BaseModel):
+    items: list[RecentDatasetItem]
+
+
 @app.get("/api/dataset/current")
 def get_current_dataset(session_id: str | None = None):
     """返回当前 Lance 数据源和可浏览根目录。"""
     session = _get_session(session_id)
     return _make_dataset_response(session)
+
+
+@app.get("/api/dataset/recent", response_model=RecentDatasetsResponse)
+def get_recent_datasets():
+    """从 public.lance_record 返回最近可选的 Lance 数据集路径。"""
+    import psycopg2
+
+    dsn = _get_database_dsn()
+    conn = psycopg2.connect(dsn, connect_timeout=5)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT dataset_path, dataset_name, source_schema, created_at
+                FROM (
+                    SELECT
+                        dataset_path,
+                        dataset_name,
+                        source_schema,
+                        created_at,
+                        id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY dataset_path
+                            ORDER BY created_at DESC, id DESC
+                        ) AS rn
+                    FROM public.lance_record
+                    WHERE dataset_path IS NOT NULL
+                      AND dataset_path <> ''
+                ) ranked
+                WHERE rn = 1
+                ORDER BY created_at DESC, dataset_path ASC
+                LIMIT 300
+                """
+            )
+            rows = cur.fetchall()
+    except Exception:
+        return RecentDatasetsResponse(items=[])
+    finally:
+        conn.close()
+
+    items: list[RecentDatasetItem] = []
+    for dataset_path, dataset_name, source_schema, created_at in rows:
+        try:
+            resolved = _resolve_browser_path(dataset_path, must_exist=True)
+        except HTTPException:
+            continue
+        if not _is_lance_path(resolved):
+            continue
+        items.append(
+            RecentDatasetItem(
+                dataset_path=str(resolved),
+                dataset_name=dataset_name or resolved.name,
+                source_schema=source_schema,
+                created_at=created_at.isoformat() if created_at else None,
+            )
+        )
+    return RecentDatasetsResponse(items=items)
 
 
 @app.get("/api/dataset/browse")
@@ -314,6 +413,7 @@ def load_dataset(payload: DatasetLoadPayload):
 def list_trajectories(session_id: str | None = None):
     """返回所有轨迹的列表，格式 [{label, index}, ...]。"""
     session = _get_session(session_id)
+    _ensure_dataset_selected(session)
     adapter: ViewerAdapter = session["adapter"]
     print(f"[API] /api/trajectories 开始 session={session['id']}")
     options = adapter.list_items()
@@ -325,6 +425,7 @@ def list_trajectories(session_id: str | None = None):
 def get_trajectory_info(index: int, session_id: str | None = None):
     """返回指定轨迹的元数据。"""
     session = _get_session(session_id)
+    _ensure_dataset_selected(session)
     return session["adapter"].get_item_info(index)
 
 
@@ -335,6 +436,7 @@ def load_trajectory(index: int, session_id: str | None = None):
     前端切换轨迹时调用，服务端会缓存计算结果。
     """
     session = _get_session(session_id)
+    _ensure_dataset_selected(session)
     print(f"[API] /api/trajectory/{index}/load 开始 session={session['id']}")
     state = _get_state(index, session_id=session["id"])
     result = session["adapter"].get_load_payload(index, state)
@@ -356,6 +458,7 @@ def get_frame(
 ):
     """返回指定帧的 3D 数据（mesh/joints 顶点坐标 + faces 索引）。"""
     session = _get_session(session_id)
+    _ensure_dataset_selected(session)
     state = _get_state(index, session_id=session["id"])
     return session["adapter"].get_frame_payload(
         state=state,
@@ -373,6 +476,7 @@ def get_frame(
 def get_object_mesh(index: int, session_id: str | None = None):
     """返回物体网格（只需加载一次）。"""
     session = _get_session(session_id)
+    _ensure_dataset_selected(session)
     state = _get_state(index, session_id=session["id"])
     return session["adapter"].get_object_mesh_payload(state)
 
@@ -387,6 +491,7 @@ def get_video_frame(
 ):
     """返回指定帧的视频图像（base64 data URI）。"""
     session = _get_session(session_id)
+    _ensure_dataset_selected(session)
     payload = session["adapter"].get_video_frame_payload(index, cam_idx, frame_idx, stream)
     if payload is None:
         raise HTTPException(status_code=404, detail="视频帧不可用")
@@ -397,6 +502,7 @@ def get_video_frame(
 def get_curves(index: int, session_id: str | None = None):
     """返回指定轨迹所有曲线选项名称。"""
     session = _get_session(session_id)
+    _ensure_dataset_selected(session)
     state = _get_state(index, session_id=session["id"])
     return session["adapter"].get_curve_options(state)
 
@@ -408,6 +514,7 @@ def get_all_curves(index: int, session_id: str | None = None):
 
     t0 = time.time()
     session = _get_session(session_id)
+    _ensure_dataset_selected(session)
     print(f"[API] /api/curves/{index}/all 开始 session={session['id']}")
     state = _get_state(index, session_id=session["id"])
     t1 = time.time()
@@ -421,9 +528,9 @@ def get_all_curves(index: int, session_id: str | None = None):
 def get_curve(index: int, curve_name: str, session_id: str | None = None):
     """返回指定曲线的全帧数据 float 列表。"""
     session = _get_session(session_id)
+    _ensure_dataset_selected(session)
     state = _get_state(index, session_id=session["id"])
     data = session["adapter"].get_curve_data(state, curve_name)
     if data is None:
         raise HTTPException(status_code=404, detail=f"曲线 '{curve_name}' 不存在")
     return {"name": curve_name, "data": data}
-

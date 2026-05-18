@@ -20,12 +20,32 @@ body {
 #traj-select { flex: 1; max-width: 480px; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; }
 #traj-info { color: #7f8c8d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #source-wrap { margin-left: auto; display: flex; align-items: center; gap: 5px; min-width: 340px; max-width: 520px; flex: 0 1 42%; }
-#source-path { min-width: 0; flex: 1; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; font-size: 12px; outline: none; }
+#source-picker-wrap { position: relative; min-width: 0; flex: 1; }
+#source-path { width: 100%; min-width: 0; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; font-size: 12px; outline: none; }
 #source-path:focus { border-color: #1890ff; }
 .top-btn { padding: 4px 9px; border: 1px solid #d9dee4; background: #ffffff; color: #2c3e50; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; }
 .top-btn:hover { border-color: #1890ff; color: #1890ff; }
 #btn-source-load { background: #1890ff; color: #fff; border-color: #1890ff; }
 #btn-source-load:hover { background: #096dd9; color: #fff; }
+#source-dropdown {
+  display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 999;
+  background: #ffffff; border: 1px solid #dee2e6; border-radius: 4px;
+  max-height: 320px; overflow-y: auto; margin-top: 2px;
+}
+#source-dropdown.open { display: block; }
+.source-item {
+  padding: 7px 8px; cursor: pointer; font-size: 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.source-item:last-child { border-bottom: none; }
+.source-item:hover, .source-item.active { background: #f8f9fa; }
+.source-item-main {
+  color: #2c3e50; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.source-item-sub {
+  color: #94a3b8; font-size: 10px; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* ── 轨迹搜索 ── */
 #traj-search-wrap { position: relative; flex: 1; max-width: 480px; }
@@ -177,7 +197,10 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
   </div>
   <span id="traj-info"></span>
   <div id="source-wrap">
-    <input id="source-path" type="text" placeholder="输入 /mnt/.../*.lance 数据源路径" autocomplete="off">
+    <div id="source-picker-wrap">
+      <input id="source-path" type="text" placeholder="选择或输入 Lance 数据源" autocomplete="off">
+      <div id="source-dropdown"></div>
+    </div>
     <button class="top-btn" id="btn-source-browse">浏览</button>
     <button class="top-btn" id="btn-source-load">加载</button>
   </div>
@@ -273,6 +296,7 @@ const S = {
   frameIdx: 0,
   numCameras: 0,
   curveData: {},
+  lancePath: '',
   playTimer: null,
   _playing: false,
   playFps: 15,
@@ -312,6 +336,7 @@ function withSession(url) {
 let _frameSeq = 0;
 let _frameAbort = null;
 let _browserState = { path: '', parent: null, roots: [] };
+let _recentLanceRecords = [];
 function showLoading(msg) { $('loading-msg').textContent = msg; $('loading').classList.remove('hidden'); }
 function hideLoading() { $('loading').classList.add('hidden'); }
 function stopPlay() {
@@ -684,9 +709,20 @@ function setTrajectoryList(trajs) {
   }
 }
 
+function clearSourceSelection() {
+  S.lancePath = '';
+  $('source-path').value = '';
+  $('source-path').dataset.selectedPath = '';
+  $('source-path').dataset.selectedName = '';
+}
+
 async function loadDatasetFromPath(path) {
   const lancePath = path.trim();
-  if (!lancePath) return;
+  if (!lancePath) {
+    clearSourceSelection();
+    clearTrajectoryVisuals();
+    return;
+  }
   stopPlay();
   showLoading('切换数据源…');
   try {
@@ -696,7 +732,11 @@ async function loadDatasetFromPath(path) {
       body: JSON.stringify({ lance_path: lancePath, session_id: S.datasetSessionId || null }),
     });
     setDatasetSessionId(result.session_id || '');
-    $('source-path').value = result.lance_path || lancePath;
+    S.lancePath = result.lance_path || lancePath;
+    const currentRecord = _recentLanceRecords.find(item => item.dataset_path === S.lancePath);
+    $('source-path').value = currentRecord?.dataset_name || currentRecord?.dataset_path || result.lance_path || lancePath;
+    $('source-path').dataset.selectedPath = S.lancePath;
+    $('source-path').dataset.selectedName = currentRecord?.dataset_name || currentRecord?.dataset_path || '';
     setTrajectoryList(result.trajectories || []);
     if (_allTrajs.length) {
       await loadTrajectory(_allTrajs[0].index);
@@ -779,6 +819,64 @@ function renderBrowser(payload) {
     };
     list.appendChild(row);
   });
+}
+
+async function fetchRecentDatasets() {
+  try {
+    const payload = await apiFetch('./api/dataset/recent');
+    _recentLanceRecords = Array.isArray(payload.items) ? payload.items : [];
+  } catch (e) {
+    console.error('加载 Lance 数据集列表失败:', e);
+    _recentLanceRecords = [];
+  }
+}
+
+function resolveSourceInputPath() {
+  const input = $('source-path');
+  const rawValue = input.value.trim();
+  if (!rawValue) return '';
+  const selectedPath = input.dataset.selectedPath || '';
+  const selectedName = input.dataset.selectedName || '';
+  if (selectedPath && rawValue === selectedName) return selectedPath;
+  const exact = _recentLanceRecords.find(item => item.dataset_name === rawValue);
+  return exact ? exact.dataset_path : rawValue;
+}
+
+function renderSourceDropdown(keyword = '') {
+  const dd = $('source-dropdown');
+  const kw = keyword.trim().toLowerCase();
+  const matched = kw
+    ? _recentLanceRecords.filter(item => (item.dataset_name || '').toLowerCase().includes(kw))
+    : _recentLanceRecords;
+  dd.innerHTML = '';
+  if (!matched.length) {
+    dd.innerHTML = '<div class="source-item"><div class="source-item-main" style="color:#bfbfbf">无可选 Lance 数据集</div></div>';
+  } else {
+    matched.forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'source-item';
+      const meta = [
+        item.source_schema || 'unknown',
+        item.created_at ? item.created_at.replace('T', ' ').slice(0, 19) : '',
+      ].filter(Boolean).join(' · ');
+      el.innerHTML = `
+        <div class="source-item-main"></div>
+        <div class="source-item-sub"></div>
+      `;
+      el.querySelector('.source-item-main').textContent = item.dataset_name || item.dataset_path;
+      el.querySelector('.source-item-sub').textContent = meta;
+      if (item.dataset_path === S.lancePath) el.classList.add('active');
+      el.onclick = async () => {
+        $('source-path').value = item.dataset_name || item.dataset_path;
+        $('source-path').dataset.selectedPath = item.dataset_path;
+        $('source-path').dataset.selectedName = item.dataset_name || item.dataset_path;
+        dd.classList.remove('open');
+        await loadDatasetFromPath(item.dataset_path);
+      };
+      dd.appendChild(el);
+    });
+  }
+  dd.classList.add('open');
 }
 
 async function browseDataSource(path) {
@@ -901,16 +999,26 @@ $('traj-search').addEventListener('input', e => renderDropdown(e.target.value));
 $('traj-search').addEventListener('focus', e => renderDropdown(e.target.value));
 document.addEventListener('click', e => {
   if (!$('traj-search-wrap').contains(e.target)) $('traj-dropdown').classList.remove('open');
+  if (!$('source-picker-wrap').contains(e.target)) $('source-dropdown').classList.remove('open');
 });
 
-$('btn-source-load').onclick = () => loadDatasetFromPath($('source-path').value);
+$('btn-source-load').onclick = () => loadDatasetFromPath(resolveSourceInputPath());
 $('source-path').addEventListener('keydown', e => {
-  if (e.key === 'Enter') loadDatasetFromPath($('source-path').value);
+  if (e.key === 'Enter') loadDatasetFromPath(resolveSourceInputPath());
+});
+$('source-path').addEventListener('input', e => {
+  e.target.dataset.selectedPath = '';
+  e.target.dataset.selectedName = '';
+  renderSourceDropdown(e.target.value);
+});
+$('source-path').addEventListener('focus', async e => {
+  if (!_recentLanceRecords.length) await fetchRecentDatasets();
+  renderSourceDropdown(e.target.value);
 });
 $('btn-source-browse').onclick = async () => {
   $('source-modal').classList.remove('hidden');
   try {
-    await browseDataSource($('source-path').value.trim());
+    await browseDataSource(resolveSourceInputPath());
   } catch {
     await browseDataSource();
   }
@@ -960,17 +1068,31 @@ $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ �
 // ════════════════════════════════════════════════════════
 (async () => {
   try {
-    showLoading('加载轨迹列表…');
+    showLoading('初始化…');
     try {
       const current = await apiFetch(withSession('./api/dataset/current'));
       setDatasetSessionId(current.session_id || S.datasetSessionId);
-      $('source-path').value = current.lance_path || '';
+      S.lancePath = current.lance_path || '';
     } catch {}
-    const trajs = await apiFetch(withSession('./api/trajectories'));
-    setTrajectoryList(trajs);
-    if (_allTrajs.length) {
-      await loadTrajectory(_allTrajs[0].index);
-    } else hideLoading();
+    await fetchRecentDatasets();
+    if (S.lancePath) {
+      const currentRecord = _recentLanceRecords.find(item => item.dataset_path === S.lancePath);
+      $('source-path').value = currentRecord?.dataset_name || currentRecord?.dataset_path || '';
+      $('source-path').dataset.selectedPath = S.lancePath;
+      $('source-path').dataset.selectedName = currentRecord?.dataset_name || currentRecord?.dataset_path || '';
+      const trajs = await apiFetch(withSession('./api/trajectories'));
+      setTrajectoryList(trajs);
+      if (_allTrajs.length) {
+        await loadTrajectory(_allTrajs[0].index);
+      } else {
+        clearTrajectoryVisuals();
+        hideLoading();
+      }
+    } else {
+      clearSourceSelection();
+      clearTrajectoryVisuals();
+      hideLoading();
+    }
   } catch (e) { $('loading-msg').textContent = `错误: ${e.message}`; }
 })();
 </script>
