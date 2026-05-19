@@ -40,6 +40,11 @@ class ObjectTransformPayload(TypedDict):
     rotation: list[float]
 
 
+class ObjectPosePayload(TypedDict):
+    pos: list[float]
+    rot_aa: list[float]
+
+
 class FramePayload(TypedDict, total=False):
     frame_idx: int
     total_frames: int
@@ -51,6 +56,7 @@ class FramePayload(TypedDict, total=False):
     urdf_meshes: list[MeshPayload] | None
     object_mesh: MeshPayload | None
     object_transform: ObjectTransformPayload | None
+    object_pose: ObjectPosePayload | None
     show_origin: bool
 
 

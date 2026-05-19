@@ -149,6 +149,27 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
 #three-canvas { width: 100%; height: 100%; display: block; }
 #viewport-hint { position: absolute; bottom: 6px; right: 8px; color: #bfbfbf; font-size: 10px; pointer-events: none; }
 .axis-lbl { position: absolute; font-size: 10px; pointer-events: none; transform: translate(-50%, -50%); white-space: nowrap; }
+.object-axis-lbl { font-size: 11px; font-weight: 700; text-shadow: 0 1px 3px rgba(0,0,0,0.85); }
+#object-pose-overlay {
+  position: absolute; top: 8px; left: 8px; z-index: 3; pointer-events: none;
+  min-width: 238px; max-width: min(320px, calc(100% - 16px));
+  background: rgba(12, 18, 27, 0.82); border: 1px solid rgba(148, 163, 184, 0.28);
+  color: #e5edf7; border-radius: 6px; padding: 8px 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  box-shadow: 0 10px 26px rgba(0,0,0,0.22);
+}
+#object-pose-overlay.hidden { display: none; }
+.pose-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.pose-title span:first-child { color: #cbd5e1; font-size: 10px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; }
+.pose-title span:last-child { color: #94a3b8; font-size: 10px; }
+.pose-grid { display: grid; grid-template-columns: 54px repeat(3, minmax(0, 1fr)); gap: 4px 7px; align-items: baseline; font-size: 10px; }
+.pose-grid .pose-label { color: #93a4b8; }
+.pose-grid .pose-value { color: #f8fafc; text-align: right; font-variant-numeric: tabular-nums; }
+.pose-axis-legend { display: flex; gap: 10px; margin-top: 7px; color: #cbd5e1; font-size: 10px; }
+.pose-axis-legend span::before { content: ""; display: inline-block; width: 8px; height: 2px; margin-right: 4px; vertical-align: middle; background: currentColor; }
+.pose-axis-x { color: #ff6b6b; }
+.pose-axis-y { color: #51cf66; }
+.pose-axis-z { color: #60a5fa; }
 
 /* ── 视频 ── */
 #video-panel {
@@ -242,6 +263,7 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
         <label class="cb-row"><input type="checkbox" id="cb-urdf-joints"> URDF Joints</label>
         <label class="cb-row"><input type="checkbox" id="cb-urdf-mesh"> URDF Mesh</label>
         <label class="cb-row"><input type="checkbox" id="cb-object" checked> Object</label>
+        <label class="cb-row"><input type="checkbox" id="cb-object-axes" checked> Object Pose Axis</label>
         <label class="cb-row"><input type="checkbox" id="cb-grid" checked> 网格</label>
       </div>
     </div>
@@ -262,6 +284,24 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
   <!-- 3D 视口 -->
   <div id="viewport">
     <canvas id="three-canvas"></canvas>
+    <div id="object-pose-overlay" class="hidden">
+      <div class="pose-title"><span>objects pose</span><span>lance raw</span></div>
+      <div class="pose-grid">
+        <span class="pose-label">pos</span>
+        <span id="obj-pos-x" class="pose-value">--</span>
+        <span id="obj-pos-y" class="pose-value">--</span>
+        <span id="obj-pos-z" class="pose-value">--</span>
+        <span class="pose-label">rot_aa</span>
+        <span id="obj-rot-x" class="pose-value">--</span>
+        <span id="obj-rot-y" class="pose-value">--</span>
+        <span id="obj-rot-z" class="pose-value">--</span>
+      </div>
+      <div class="pose-axis-legend">
+        <span class="pose-axis-x">X</span>
+        <span class="pose-axis-y">Y</span>
+        <span class="pose-axis-z">Z</span>
+      </div>
+    </div>
     <div id="axis-labels" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;"></div>
     <div id="viewport-hint">左键旋转 · 右键平移 · 滚轮缩放</div>
   </div>
@@ -443,6 +483,121 @@ const OBJ = {
 };
 const urdfMeshObjs = Array.from({ length: 25 }, () => makeMeshObj(0xf5deb3, 0.7));
 let objectMeshData = null; // 存储物体网格数据（只加载一次）
+let objectAxesLength = 0.12;
+const OBJECT_AXIS_DIRECTIONS = {
+  x: new THREE.Vector3(1, 0, 0),   // lance X -> Three X
+  y: new THREE.Vector3(0, 0, -1),  // lance Y -> Three -Z
+  z: new THREE.Vector3(0, 1, 0),   // lance Z -> Three Y
+};
+
+function makeObjectPoseAxes() {
+  const group = new THREE.Group();
+  const specs = [
+    ['x', 0xff6b6b],
+    ['y', 0x51cf66],
+    ['z', 0x60a5fa],
+  ];
+  specs.forEach(([key, color]) => {
+    const arrow = new THREE.ArrowHelper(
+      OBJECT_AXIS_DIRECTIONS[key],
+      new THREE.Vector3(0, 0, 0),
+      objectAxesLength,
+      color,
+      objectAxesLength * 0.22,
+      objectAxesLength * 0.08
+    );
+    arrow.userData.axisKey = key;
+    arrow.traverse(child => {
+      if (child.material) {
+        child.material.depthTest = false;
+        child.material.depthWrite = false;
+      }
+      child.renderOrder = 20;
+    });
+    group.add(arrow);
+  });
+  group.visible = false;
+  scene.add(group);
+  return group;
+}
+
+const objectPoseAxes = makeObjectPoseAxes();
+
+function setObjectAxesLength(length) {
+  objectAxesLength = Math.max(0.035, Math.min(0.18, length || 0.12));
+  objectPoseAxes.children.forEach(arrow => {
+    arrow.setLength(objectAxesLength, objectAxesLength * 0.22, objectAxesLength * 0.08);
+  });
+}
+
+const objectAxisLabels = ['x', 'y', 'z'].map(key => {
+  const el = document.createElement('div');
+  el.className = `axis-lbl object-axis-lbl pose-axis-${key}`;
+  el.textContent = `obj ${key.toUpperCase()}`;
+  _axisLabelsContainer.appendChild(el);
+  return { key, el, world: new THREE.Vector3() };
+});
+
+function objectPoseToThree(pos, rotAa) {
+  const position = new THREE.Vector3(pos[0], pos[2], -pos[1]);
+  const angle = Math.hypot(rotAa[0], rotAa[1], rotAa[2]);
+  const quaternion = new THREE.Quaternion();
+  if (angle > 1e-8) {
+    const axis = new THREE.Vector3(rotAa[0] / angle, rotAa[2] / angle, -rotAa[1] / angle);
+    quaternion.setFromAxisAngle(axis, angle);
+  }
+  return { position, quaternion, angle };
+}
+
+function applyObjectPose(obj, pose) {
+  const { position, quaternion } = objectPoseToThree(pose.pos, pose.rot_aa);
+  obj.position.copy(position);
+  obj.quaternion.copy(quaternion);
+}
+
+function updateObjectPoseOverlay(pose) {
+  const overlay = $('object-pose-overlay');
+  if (!pose) {
+    overlay.classList.add('hidden');
+    return;
+  }
+  overlay.classList.remove('hidden');
+  const fmt = v => Number.isFinite(v) ? v.toFixed(5) : '--';
+  $('obj-pos-x').textContent = fmt(pose.pos[0]);
+  $('obj-pos-y').textContent = fmt(pose.pos[1]);
+  $('obj-pos-z').textContent = fmt(pose.pos[2]);
+  $('obj-rot-x').textContent = fmt(pose.rot_aa[0]);
+  $('obj-rot-y').textContent = fmt(pose.rot_aa[1]);
+  $('obj-rot-z').textContent = fmt(pose.rot_aa[2]);
+}
+
+function setObjectPoseAxes(pose) {
+  const visible = !!pose && $('cb-object-axes').checked;
+  objectPoseAxes.visible = visible;
+  if (!visible) return;
+  applyObjectPose(objectPoseAxes, pose);
+}
+
+function updateObjectAxisLabels() {
+  const vp = $('viewport');
+  const W = vp.clientWidth, H = vp.clientHeight;
+  objectAxisLabels.forEach(item => {
+    if (!objectPoseAxes.visible) {
+      item.el.style.display = 'none';
+      return;
+    }
+    item.world.copy(OBJECT_AXIS_DIRECTIONS[item.key]).multiplyScalar(objectAxesLength * 1.15);
+    objectPoseAxes.localToWorld(item.world);
+    _ndcV.copy(item.world).project(camera);
+    if (_ndcV.z > 1 || _ndcV.z < -1) {
+      item.el.style.display = 'none';
+    } else {
+      item.el.style.display = '';
+      item.el.style.left = ((_ndcV.x + 1) * 0.5 * W) + 'px';
+      item.el.style.top = ((1 - (_ndcV.y + 1) * 0.5) * H) + 'px';
+    }
+  });
+}
 
 function setMesh(obj, data) {
   if (!data) { obj.visible = false; return; }
@@ -528,6 +683,7 @@ ro.observe(viewport);
   requestAnimationFrame(renderLoop);
   renderer.render(scene, camera);
   updateAxisLabels();
+  updateObjectAxisLabels();
 })();
 
 // ════════════════════════════════════════════════════════
@@ -535,19 +691,20 @@ ro.observe(viewport);
 // ════════════════════════════════════════════════════════
 function apply3D(d) {
   const hasUrdfMesh = d.urdf_meshes && d.urdf_meshes.length > 0;
+  const objectPose = d.object_pose || (
+    d.object_transform
+      ? { pos: d.object_transform.position, rot_aa: d.object_transform.rotation }
+      : null
+  );
   setMesh(OBJ.manoMesh, hasUrdfMesh ? null : d.mano_mesh);
   setPoints(OBJ.manoJoints, d.mano_joints);
   setPoints(OBJ.urdfJoints, d.urdf_joints);
+  updateObjectPoseOverlay(objectPose);
+  setObjectPoseAxes(objectPose);
 
   // 物体网格：使用变换而不是每帧传输完整数据
-  if (d.object_transform && objectMeshData) {
-    const {position, rotation} = d.object_transform;
-    OBJ.objectMesh.position.set(position[0], position[2], -position[1]);
-    const angle = Math.sqrt(rotation[0]**2 + rotation[1]**2 + rotation[2]**2);
-    if (angle > 0) {
-      const axis = new THREE.Vector3(rotation[0]/angle, rotation[2]/angle, -rotation[1]/angle);
-      OBJ.objectMesh.quaternion.setFromAxisAngle(axis, angle);
-    }
+  if (objectPose && d.object_transform && objectMeshData) {
+    applyObjectPose(OBJ.objectMesh, objectPose);
     OBJ.objectMesh.visible = true;
   } else {
     OBJ.objectMesh.visible = false;
@@ -755,7 +912,10 @@ function clearTrajectoryVisuals() {
   $('curve-select').innerHTML = '';
   $('video-img').style.display = 'none';
   $('video-none').style.display = '';
+  $('object-pose-overlay').classList.add('hidden');
   Object.values(OBJ).forEach(obj => { obj.visible = false; });
+  objectPoseAxes.visible = false;
+  objectAxisLabels.forEach(item => { item.el.style.display = 'none'; });
   urdfMeshObjs.forEach(obj => { obj.visible = false; });
   drawCurve();
 }
@@ -964,10 +1124,13 @@ async function loadTrajectory(index) {
       objectMeshData = await apiFetch(withSession(`./api/object_mesh/${index}`));
       if (objectMeshData) {
         setMesh(OBJ.objectMesh, objectMeshData);
+        OBJ.objectMesh.geometry.computeBoundingSphere();
+        setObjectAxesLength((OBJ.objectMesh.geometry.boundingSphere?.radius || 0.12) * 0.55);
       }
     } else {
       objectMeshData = null;
       OBJ.objectMesh.visible = false;
+      setObjectAxesLength(0.12);
     }
 
     $('traj-info').textContent = `${info.title}  ·  ${info.subtitle}  ·  ${info.total_frames} 帧`;
@@ -1097,7 +1260,7 @@ $('btn-browser-up').onclick = () => {
 
 ['cam-select','stream-select'].forEach(id => $(id).onchange = refreshFrame);
 
-['cb-mano-mesh','cb-mano-joints','cb-urdf-joints','cb-urdf-mesh','cb-object','cb-grid']
+['cb-mano-mesh','cb-mano-joints','cb-urdf-joints','cb-urdf-mesh','cb-object','cb-object-axes','cb-grid']
   .forEach(id => $(id).onchange = refreshFrame);
 
 $('curve-select').onchange = drawCurve;

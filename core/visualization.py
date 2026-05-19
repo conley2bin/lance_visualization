@@ -122,6 +122,10 @@ def get_frame_data(
         "urdf_joints": None,
         "urdf_meshes": None,
         "object_mesh": None,
+        "object_pose": {
+            "pos": state.obj_pos[frame_idx].tolist(),
+            "rot_aa": state.obj_rot_aa[frame_idx].tolist(),
+        },
         "show_origin": show_origin,
     }
 
