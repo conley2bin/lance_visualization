@@ -73,7 +73,7 @@
 ### 4.1 分层职责
 
 1. **配置层**：`core/config.py`
-   - 读取 `viz_config.yaml`
+   - 读取可选的 `viz_config.yaml`（未提供时回退到默认配置）
    - 解析数据路径与资源目录等
 
 2. **Adapter 抽象层**：`core/adapters.py`
@@ -169,7 +169,9 @@
 
 ## 6. 配置说明
 
-配置文件：`viz_config.yaml`
+配置文件：可选的 `viz_config.yaml`
+
+如果未提供该文件，服务会使用 `core/config.py` 中的默认配置，并允许通过环境变量覆盖关键路径。
 
 关键字段：
 
@@ -223,7 +225,6 @@ uvicorn app:app --host 0.0.0.0 --port 8868 --reload
 ```text
 human_viz/
 ├── app.py
-├── viz_config.yaml
 ├── core/
 │   ├── adapters.py          # 通用接口与 payload schema
 │   ├── viewer_factory.py    # adapter 工厂
@@ -249,7 +250,7 @@ human_viz/
 
 1. 在 `core/` 新建实现类（如 `parquet_adapter.py`）并实现 `ViewerAdapter`
 2. 在 `core/viewer_factory.py` 注册新的 `viewer.type`
-3. 在 `viz_config.yaml` 切换 `viewer.type`
+3. 如需覆盖默认行为，可通过可选 `viz_config.yaml` 或环境变量切换 `viewer.type`
 4. 保持 API 返回契约稳定，前端无需大改（仅按新 payload 增量适配）
 
 ---

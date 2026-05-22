@@ -6,9 +6,9 @@ import yaml
 
 def load_config(config_path: str = None) -> dict:
     """
-    读取 viz_config.yaml，返回配置字典。
-    config_path 为 None 时自动在 /data 和当前目录查找。
-    环境变量优先级高于 yaml 文件。
+    读取可选配置文件并返回配置字典。
+    config_path 为 None 时自动在约定位置查找 viz_config.yaml。
+    未找到配置文件时回退到内置默认值；环境变量优先级高于文件。
     """
     config = None
 
