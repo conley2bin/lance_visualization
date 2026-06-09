@@ -9,14 +9,18 @@ class TrajectoryListItem(TypedDict):
 
 
 class TrajectoryInfo(TypedDict, total=False):
+    label: str
     title: str
     subtitle: str
     total_frames: int
     scene: str
+    display_scene: str
+    gesture: str
     operator: str
     frames: int
     uuid: str
     capMachine: str
+    index_data: dict[str, Any]
 
 
 class MeshPayload(TypedDict):
@@ -66,13 +70,17 @@ class LoadPayload(TypedDict, total=False):
     has_urdf: bool
     has_object_mesh: bool
     curve_options: list[str]
+    label: str
     title: str
     subtitle: str
     scene: str
+    display_scene: str
+    gesture: str
     operator: str
     frames: int
     uuid: str
     capMachine: str
+    index_data: dict[str, Any]
 
 
 class ViewerAdapter(Protocol):

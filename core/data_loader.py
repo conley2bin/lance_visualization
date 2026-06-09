@@ -2,6 +2,28 @@ import lance
 from collections import OrderedDict
 
 
+def _sort_text(value: str | None) -> str:
+    return str(value or "").casefold()
+
+
+def _display_scene(index_data: dict | None, meta: dict | None) -> str:
+    object_names = meta.get("object_names") if meta else None
+    if isinstance(object_names, list) and object_names:
+        return str(object_names[0] or "?")
+    return str(index_data.get("scene", "?")) if index_data else "?"
+
+
+def _trajectory_label(index: int, index_data: dict | None, meta: dict | None) -> str:
+    scene = _display_scene(index_data, meta)
+    operator = index_data.get("operator", "?") if index_data else "?"
+    gesture = index_data.get("gesture", "") if index_data else ""
+    frames = meta.get("total_frames", 0) if meta else 0
+    frame_text = f"{frames}帧" if frames > 0 else "不可用"
+    if gesture:
+        return f"{index:03d}: {scene} ({operator}) / {gesture}- {frame_text}"
+    return f"{index:03d}: {scene} ({operator}) - {frame_text}"
+
+
 class OptimizedLanceLoader:
     """优化的 Lance 数据加载器，使用缓存和列选择。"""
 
@@ -21,18 +43,26 @@ class OptimizedLanceLoader:
                 meta = row["trajectory_metadata"][0].as_py()
                 self._metadata_cache[index] = {
                     "scene": index_data["scene"],
+                    "display_scene": _display_scene(index_data, meta),
+                    "gesture": index_data.get("gesture", ""),
                     "operator": index_data["operator"],
                     "frames": meta["total_frames"],
+                    "label": _trajectory_label(index, index_data, meta),
                     "uuid": (index_data.get("uuid") or "")[:16],
                     "capMachine": index_data.get("capMachine", "unknown"),
+                    "index_data": index_data,
                 }
             except Exception as e:
                 self._metadata_cache[index] = {
                     "scene": f"Error: {e}",
+                    "display_scene": f"Error: {e}",
+                    "gesture": "",
                     "operator": "N/A",
                     "frames": 0,
+                    "label": f"{index:03d}: 不可用",
                     "uuid": "unknown",
                     "capMachine": "unknown",
+                    "index_data": {},
                 }
         return self._metadata_cache[index]
 
@@ -83,20 +113,22 @@ class OptimizedLanceLoader:
         options = []
         for i, (index_data, meta) in enumerate(zip(index_list, meta_list)):
             frames = meta.get("total_frames", 0) if meta else 0
-            if frames > 0:
-                scene = index_data.get("scene", "?") if index_data else "?"
-                operator = index_data.get("operator", "?") if index_data else "?"
-                label = f"{i:03d}: {scene} ({operator}) - {frames}帧"
-            else:
-                label = f"{i:03d}: 不可用"
-            options.append((label, i))
+            scene = _display_scene(index_data, meta)
+            gesture = index_data.get("gesture", "") if index_data else ""
+            label = _trajectory_label(i, index_data, meta)
+            options.append((label, i, _sort_text(scene), _sort_text(gesture)))
             # 同时填充 metadata cache
             if index_data and meta:
                 self._metadata_cache[i] = {
                     "scene": index_data.get("scene", "?"),
+                    "display_scene": scene,
+                    "gesture": index_data.get("gesture", ""),
                     "operator": index_data.get("operator", "?"),
                     "frames": frames,
+                    "label": label,
                     "uuid": (index_data.get("uuid") or "")[:16],
                     "capMachine": index_data.get("capMachine", "unknown"),
+                    "index_data": index_data,
                 }
-        return options
+        options.sort(key=lambda item: (item[2], item[3], item[1]))
+        return [(label, index) for label, index, _, _ in options]

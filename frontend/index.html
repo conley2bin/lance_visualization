@@ -51,6 +51,21 @@ body {
 #traj-search-wrap { position: relative; flex: 1; max-width: 480px; }
 #traj-search { width: 100%; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; outline: none; }
 #traj-search:focus { border-color: #1890ff; }
+#btn-toggle-index.active { background: #e6f4ff; color: #096dd9; border-color: #91caff; }
+#index-detail-panel {
+  display: none; position: fixed; top: 42px; left: 14px; z-index: 1000;
+  width: min(620px, calc(100vw - 28px)); max-height: 360px; overflow-y: auto;
+  background: #ffffff; border: 1px solid #d8dee6; border-radius: 6px;
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.18); padding: 8px 10px;
+}
+#index-detail-panel.open { display: block; }
+.index-detail-title { color: #1890ff; font-size: 11px; font-weight: 700; margin-bottom: 6px; }
+.index-detail-row {
+  display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 8px;
+  padding: 3px 0; border-top: 1px solid #f1f5f9; font-size: 11px;
+}
+.index-detail-key { color: #64748b; font-weight: 600; }
+.index-detail-value { color: #1f2937; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 #traj-dropdown {
   display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 999;
   background: #ffffff; border: 1px solid #dee2e6; border-radius: 4px;
@@ -213,9 +228,11 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
 <div id="topbar">
   <h1>真人Lance数据可视化</h1>
   <div id="traj-search-wrap">
-    <input id="traj-search" type="text" placeholder="搜索轨迹…" autocomplete="off">
-    <div id="traj-dropdown"></div>
+  <input id="traj-search" type="text" placeholder="搜索轨迹…" autocomplete="off">
+  <div id="traj-dropdown"></div>
   </div>
+  <button class="top-btn" id="btn-toggle-index" title="显示/隐藏轨迹 index">IDX</button>
+  <div id="index-detail-panel"></div>
   <span id="traj-info"></span>
   <div id="source-wrap">
     <div id="source-picker-wrap">
@@ -340,6 +357,9 @@ const S = {
   playTimer: null,
   _playing: false,
   playFps: 15,
+  showTrajectoryIndex: false,
+  currentTrajectoryInfoBase: '',
+  currentIndexData: null,
 };
 
 // ════════════════════════════════════════════════════════
@@ -902,6 +922,8 @@ function clearTrajectoryVisuals() {
   S.frameIdx = 0;
   S.numCameras = 0;
   S.curveData = {};
+  S.currentTrajectoryInfoBase = '';
+  S.currentIndexData = null;
   objectMeshData = null;
   $('traj-search').value = '';
   $('traj-info').textContent = '';
@@ -917,16 +939,72 @@ function clearTrajectoryVisuals() {
   objectPoseAxes.visible = false;
   objectAxisLabels.forEach(item => { item.el.style.display = 'none'; });
   urdfMeshObjs.forEach(obj => { obj.visible = false; });
+  renderIndexDetails();
   drawCurve();
 }
 
-function setTrajectoryList(trajs) {
+function setTrajectoryList(trajs, options = {}) {
   _allTrajs = Array.isArray(trajs) ? trajs : [];
   if (_allTrajs.length) {
-    $('traj-search').value = _allTrajs[0].label;
-  } else {
+    if (options.updateSearch !== false) $('traj-search').value = _allTrajs[0].label;
+  } else if (options.clearOnEmpty !== false) {
     clearTrajectoryVisuals();
   }
+}
+
+function renderTrajectoryInfo() {
+  $('traj-info').textContent = S.currentTrajectoryInfoBase;
+}
+
+function renderIndexDetails() {
+  const panel = $('index-detail-panel');
+  panel.innerHTML = '';
+  if (!S.showTrajectoryIndex) {
+    panel.classList.remove('open');
+    return;
+  }
+
+  const title = document.createElement('div');
+  title.className = 'index-detail-title';
+  title.textContent = S.trajIndex === null ? 'Index 字段' : `Index 字段 · 轨迹 ${S.trajIndex}`;
+  panel.appendChild(title);
+
+  const indexData = S.currentIndexData || {};
+  const entries = Object.entries(indexData);
+  if (!entries.length) {
+    const empty = document.createElement('div');
+    empty.className = 'index-detail-row';
+    const key = document.createElement('div');
+    key.className = 'index-detail-key';
+    key.textContent = '状态';
+    const value = document.createElement('div');
+    value.className = 'index-detail-value';
+    value.textContent = '当前未加载轨迹';
+    empty.appendChild(key);
+    empty.appendChild(value);
+    panel.appendChild(empty);
+  } else {
+    entries.forEach(([field, rawValue]) => {
+      const row = document.createElement('div');
+      row.className = 'index-detail-row';
+      const key = document.createElement('div');
+      key.className = 'index-detail-key';
+      key.textContent = field;
+      const value = document.createElement('div');
+      value.className = 'index-detail-value';
+      if (rawValue === null || rawValue === undefined) {
+        value.textContent = '';
+      } else if (typeof rawValue === 'object') {
+        value.textContent = JSON.stringify(rawValue, null, 2);
+      } else {
+        value.textContent = String(rawValue);
+      }
+      row.appendChild(key);
+      row.appendChild(value);
+      panel.appendChild(row);
+    });
+  }
+  panel.classList.add('open');
 }
 
 function clearSourceSelection() {
@@ -1118,6 +1196,7 @@ async function loadTrajectory(index) {
     S.frameIdx = 0;
     S.numCameras = info.num_cameras;
     S.curveData = {};
+    S.currentIndexData = info.index_data || null;
 
     // 加载物体网格（只加载一次）
     if (info.has_object_mesh) {
@@ -1133,7 +1212,9 @@ async function loadTrajectory(index) {
       setObjectAxesLength(0.12);
     }
 
-    $('traj-info').textContent = `${info.title}  ·  ${info.subtitle}  ·  ${info.total_frames} 帧`;
+    S.currentTrajectoryInfoBase = info.label || `${info.title}  ·  ${info.subtitle}  ·  ${info.total_frames} 帧`;
+    renderTrajectoryInfo();
+    renderIndexDetails();
     $('frame-slider').max = info.total_frames - 1;
     $('frame-slider').value = 0;
 
@@ -1184,6 +1265,10 @@ $('frame-slider').oninput = async () => {
 let _allTrajs = [];   // 全量数据，仅存 JS 数组，不创建 DOM
 const SHOW_MAX = Infinity;
 
+function trajectoryDisplayLabel(label, index) {
+  return label;
+}
+
 function renderDropdown(keyword) {
   const kw = keyword.trim().toLowerCase();
   const matched = kw
@@ -1198,7 +1283,7 @@ function renderDropdown(keyword) {
     items.forEach(({ label, index }) => {
       const el = document.createElement('div');
       el.className = 'traj-item';
-      el.textContent = label;
+      el.textContent = trajectoryDisplayLabel(label, index);
       if (index === S.trajIndex) el.classList.add('active');
       el.onclick = () => {
         $('traj-search').value = label;
@@ -1220,6 +1305,12 @@ function renderDropdown(keyword) {
 
 $('traj-search').addEventListener('input', e => renderDropdown(e.target.value));
 $('traj-search').addEventListener('focus', e => renderDropdown(e.target.value));
+$('btn-toggle-index').onclick = () => {
+  S.showTrajectoryIndex = !S.showTrajectoryIndex;
+  $('btn-toggle-index').classList.toggle('active', S.showTrajectoryIndex);
+  renderTrajectoryInfo();
+  renderIndexDetails();
+};
 document.addEventListener('click', e => {
   if (!$('traj-search-wrap').contains(e.target)) $('traj-dropdown').classList.remove('open');
   if (!$('source-picker-wrap').contains(e.target)) $('source-dropdown').classList.remove('open');

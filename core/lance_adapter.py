@@ -31,9 +31,10 @@ class LanceViewerAdapter(ViewerAdapter):
     def get_item_info(self, index: int) -> TrajectoryInfo:
         self._validate_index(index)
         info = self.loader.get_trajectory_info(index)
+        display_scene = info.get("display_scene") or info["scene"]
         return {
             **info,
-            "title": info["scene"],
+            "title": f"{display_scene} / {info['gesture']}" if info.get("gesture") else display_scene,
             "subtitle": info["operator"],
             "total_frames": info["frames"],
         }
