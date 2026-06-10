@@ -6,6 +6,7 @@ from typing import Any, Protocol, TypedDict
 class TrajectoryListItem(TypedDict):
     label: str
     index: int
+    uuid: str
 
 
 class TrajectoryInfo(TypedDict, total=False):

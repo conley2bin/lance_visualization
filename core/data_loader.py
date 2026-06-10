@@ -24,6 +24,10 @@ def _trajectory_label(index: int, index_data: dict | None, meta: dict | None) ->
     return f"{index:03d}: {scene} ({operator}) - {frame_text}"
 
 
+def _trajectory_uuid(index_data: dict | None) -> str:
+    return str(index_data.get("uuid") or "") if index_data else ""
+
+
 class OptimizedLanceLoader:
     """优化的 Lance 数据加载器，使用缓存和列选择。"""
 
@@ -102,8 +106,8 @@ class OptimizedLanceLoader:
 
         return result
 
-    def create_trajectory_options(self) -> list[tuple[str, int]]:
-        """批量读取所有轨迹 metadata，返回 (label, index) 列表。"""
+    def create_trajectory_options(self) -> list[tuple[str, int, str]]:
+        """批量读取所有轨迹 metadata，返回 (label, index, uuid) 列表。"""
         table = self.dataset.to_table(columns=["index", "trajectory_metadata"])
 
         # 批量转换为 Python 对象，避免逐行调用 as_py()
@@ -116,7 +120,8 @@ class OptimizedLanceLoader:
             scene = _display_scene(index_data, meta)
             gesture = index_data.get("gesture", "") if index_data else ""
             label = _trajectory_label(i, index_data, meta)
-            options.append((label, i, _sort_text(scene), _sort_text(gesture)))
+            uuid = _trajectory_uuid(index_data)
+            options.append((label, i, uuid, _sort_text(scene), _sort_text(gesture)))
             # 同时填充 metadata cache
             if index_data and meta:
                 self._metadata_cache[i] = {
@@ -130,5 +135,5 @@ class OptimizedLanceLoader:
                     "capMachine": index_data.get("capMachine", "unknown"),
                     "index_data": index_data,
                 }
-        options.sort(key=lambda item: (item[2], item[3], item[1]))
-        return [(label, index) for label, index, _, _ in options]
+        options.sort(key=lambda item: (item[3], item[4], item[1]))
+        return [(label, index, uuid) for label, index, uuid, _, _ in options]

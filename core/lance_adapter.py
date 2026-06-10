@@ -26,7 +26,7 @@ class LanceViewerAdapter(ViewerAdapter):
 
     def list_items(self) -> list[TrajectoryListItem]:
         options = self.loader.create_trajectory_options()
-        return [{"label": label, "index": idx} for label, idx in options]
+        return [{"label": label, "index": idx, "uuid": uuid} for label, idx, uuid in options]
 
     def get_item_info(self, index: int) -> TrajectoryInfo:
         self._validate_index(index)

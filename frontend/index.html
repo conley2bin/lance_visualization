@@ -51,6 +51,16 @@ body {
 #traj-search-wrap { position: relative; flex: 1; max-width: 480px; }
 #traj-search { width: 100%; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; outline: none; }
 #traj-search:focus { border-color: #1890ff; }
+.search-mode {
+  display: inline-flex; border: 1px solid #d9dee4; border-radius: 4px; overflow: hidden;
+  background: #ffffff; flex: 0 0 auto;
+}
+.search-mode-btn {
+  border: none; background: #ffffff; color: #64748b; padding: 4px 8px;
+  font-size: 12px; cursor: pointer; border-right: 1px solid #e5e7eb;
+}
+.search-mode-btn:last-child { border-right: none; }
+.search-mode-btn.active { background: #e6f4ff; color: #096dd9; font-weight: 600; }
 #btn-toggle-index.active { background: #e6f4ff; color: #096dd9; border-color: #91caff; }
 #index-detail-panel {
   display: none; position: fixed; top: 42px; left: 14px; z-index: 1000;
@@ -228,8 +238,12 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
 <div id="topbar">
   <h1>真人Lance数据可视化</h1>
   <div id="traj-search-wrap">
-  <input id="traj-search" type="text" placeholder="搜索轨迹…" autocomplete="off">
+  <input id="traj-search" type="text" placeholder="搜索轨迹名…" autocomplete="off">
   <div id="traj-dropdown"></div>
+  </div>
+  <div class="search-mode" aria-label="搜索模式">
+    <button class="search-mode-btn active" data-search-mode="name" type="button">名称</button>
+    <button class="search-mode-btn" data-search-mode="uuid" type="button">UUID</button>
   </div>
   <button class="top-btn" id="btn-toggle-index" title="显示/隐藏轨迹 index">IDX</button>
   <div id="index-detail-panel"></div>
@@ -360,6 +374,7 @@ const S = {
   showTrajectoryIndex: false,
   currentTrajectoryInfoBase: '',
   currentIndexData: null,
+  searchMode: 'name',
 };
 
 // ════════════════════════════════════════════════════════
@@ -1269,11 +1284,109 @@ function trajectoryDisplayLabel(label, index) {
   return label;
 }
 
+function normalizeSearchText(value) {
+  return String(value || '').normalize('NFKC').toLowerCase();
+}
+
+function compactSearchText(value) {
+  return normalizeSearchText(value).replace(/[^a-z0-9\u4e00-\u9fff]+/g, '');
+}
+
+function searchableTrajectoryLabel(label) {
+  return String(label || '').replace(/\s*-\s*(?:\d+帧|不可用)\s*$/, '');
+}
+
+function parseTrajectoryLabel(label) {
+  const text = searchableTrajectoryLabel(label);
+  const match = text.match(/^(\d+):\s*(.*?)\s+\((.*?)\)(?:\s*\/\s*(.*))?$/);
+  return {
+    rowIndex: match?.[1] || '',
+    objectName: match?.[2] || '',
+    operator: match?.[3] || '',
+    gesture: match?.[4] || '',
+  };
+}
+
+function subsequenceScore(needle, haystack) {
+  if (!needle) return 0;
+  let pos = 0;
+  let first = -1;
+  let last = -1;
+  let gaps = 0;
+  for (const ch of needle) {
+    const found = haystack.indexOf(ch, pos);
+    if (found === -1) return null;
+    if (first === -1) first = found;
+    if (last !== -1) gaps += Math.max(0, found - last - 1);
+    last = found;
+    pos = found + 1;
+  }
+  return 120 - first * 2 - gaps;
+}
+
+function trajectorySearchScore(traj, keyword) {
+  const query = normalizeSearchText(keyword).trim();
+  const compactQuery = compactSearchText(query);
+  if (!compactQuery) return 0;
+
+  const label = searchableTrajectoryLabel(traj.label);
+  const normalizedLabel = normalizeSearchText(label);
+  const orderedCompact = compactSearchText(label);
+
+  if (normalizedLabel.includes(query)) return 1000 - String(traj.index).length;
+  if (orderedCompact.includes(compactQuery)) return 900 - orderedCompact.indexOf(compactQuery);
+
+  const orderedSubseq = subsequenceScore(compactQuery, orderedCompact);
+  if (orderedSubseq === null) return null;
+
+  const parsed = parseTrajectoryLabel(traj.label);
+  const objectSubseq = subsequenceScore(compactQuery, compactSearchText(parsed.objectName));
+  if (objectSubseq !== null) return 860 + objectSubseq;
+
+  const objectGestureSubseq = subsequenceScore(
+    compactQuery,
+    compactSearchText(`${parsed.objectName} ${parsed.gesture}`)
+  );
+  if (objectGestureSubseq !== null) return 760 + objectGestureSubseq;
+
+  return 620 + orderedSubseq;
+}
+
+function uuidSearchKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-f0-9]+/g, '');
+}
+
+function trajectoryUuidSearchScore(traj, keyword) {
+  const query = uuidSearchKey(keyword);
+  if (!query) return 0;
+  const uuid = uuidSearchKey(traj.uuid);
+  if (!uuid) return null;
+  const pos = uuid.indexOf(query);
+  return pos === -1 ? null : 1000 - pos;
+}
+
+function filterTrajectories(keyword) {
+  const kw = keyword.trim();
+  if (!kw) return _allTrajs;
+  const scoreFn = S.searchMode === 'uuid' ? trajectoryUuidSearchScore : trajectorySearchScore;
+  return _allTrajs
+    .map(traj => ({ ...traj, _score: scoreFn(traj, kw) }))
+    .filter(traj => traj._score !== null)
+    .sort((a, b) => b._score - a._score || a.index - b.index);
+}
+
+function setTrajectorySearchMode(mode) {
+  S.searchMode = mode === 'uuid' ? 'uuid' : 'name';
+  document.querySelectorAll('.search-mode-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.searchMode === S.searchMode);
+  });
+  $('traj-search').placeholder = S.searchMode === 'uuid' ? '搜索 UUID…' : '搜索轨迹名…';
+  $('traj-search').value = '';
+  renderDropdown('');
+}
+
 function renderDropdown(keyword) {
-  const kw = keyword.trim().toLowerCase();
-  const matched = kw
-    ? _allTrajs.filter(t => t.label.toLowerCase().includes(kw))
-    : _allTrajs;
+  const matched = filterTrajectories(keyword);
   const items = matched.slice(0, SHOW_MAX);
   const dd = $('traj-dropdown');
   dd.innerHTML = '';
@@ -1304,7 +1417,13 @@ function renderDropdown(keyword) {
 }
 
 $('traj-search').addEventListener('input', e => renderDropdown(e.target.value));
-$('traj-search').addEventListener('focus', e => renderDropdown(e.target.value));
+$('traj-search').addEventListener('focus', e => {
+  e.target.select();
+  renderDropdown('');
+});
+document.querySelectorAll('.search-mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => setTrajectorySearchMode(btn.dataset.searchMode));
+});
 $('btn-toggle-index').onclick = () => {
   S.showTrajectoryIndex = !S.showTrajectoryIndex;
   $('btn-toggle-index').classList.toggle('active', S.showTrajectoryIndex);
@@ -1360,20 +1479,39 @@ $('btn-play').onclick = () => {
   if (S._playing) return; // 防止重复点击
   stopPlay();
   S._playing = true;
-  const interval = 1000 / S.playFps;
+  const interval = 10; // 原始 CMA 数据固定 100Hz，每两帧间隔 0.01 秒
+  const startFrame = S.frameIdx;
+  const startTime = performance.now();
+
+  function nextDueDelay() {
+    const elapsed = performance.now() - startTime;
+    const elapsedFrames = Math.floor(elapsed / interval);
+    const nextFrame = Math.min(S.totalFrames - 1, startFrame + elapsedFrames + 1);
+    const nextDueTime = startTime + (nextFrame - startFrame) * interval;
+    return Math.max(0, nextDueTime - performance.now());
+  }
+
   async function step() {
     if (!S._playing) return;
     if (S.frameIdx >= S.totalFrames - 1) { stopPlay(); $('btn-play').textContent = '▶ 播放'; return; }
-    const t0 = Date.now();
-    S.frameIdx++;
+    const elapsed = performance.now() - startTime;
+    const targetFrame = Math.min(
+      S.totalFrames - 1,
+      startFrame + Math.floor(elapsed / interval)
+    );
+    if (targetFrame <= S.frameIdx) {
+      S.playTimer = setTimeout(step, nextDueDelay());
+      return;
+    }
+    S.frameIdx = targetFrame;
     $('frame-slider').value = S.frameIdx;
     await refreshFrame();
     if (!S._playing) return;
-    const elapsed = Date.now() - t0;
-    S.playTimer = setTimeout(step, Math.max(0, interval - elapsed));
+    if (S.frameIdx >= S.totalFrames - 1) { stopPlay(); $('btn-play').textContent = '▶ 播放'; return; }
+    S.playTimer = setTimeout(step, nextDueDelay());
   }
   $('btn-play').textContent = '⏸ 播放中';
-  step();
+  S.playTimer = setTimeout(step, interval);
 };
 $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ 播放'; };
 
