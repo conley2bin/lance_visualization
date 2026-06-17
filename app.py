@@ -498,6 +498,15 @@ def get_video_frame(
     return payload
 
 
+@app.get("/api/cma/{index}/{frame_idx}")
+def get_cma_frame(index: int, frame_idx: int, session_id: str | None = None):
+    """返回指定帧的原始 CMA 数据；缺失时返回 available=false。"""
+    session = _get_session(session_id)
+    _ensure_dataset_selected(session)
+    state = _get_state(index, session_id=session["id"])
+    return session["adapter"].get_cma_frame_payload(state, frame_idx)
+
+
 @app.get("/api/curves/{index}")
 def get_curves(index: int, session_id: str | None = None):
     """返回指定轨迹所有曲线选项名称。"""

@@ -4,7 +4,8 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from .adapters import FramePayload, LoadPayload, MeshPayload, TrajectoryInfo, TrajectoryListItem, ViewerAdapter
+from .adapters import CmaFramePayload, FramePayload, LoadPayload, MeshPayload, TrajectoryInfo, TrajectoryListItem, ViewerAdapter
+from .cma import get_cma_frame_data
 from .curves import get_curve_data, get_curve_options
 from .data_loader import OptimizedLanceLoader
 from .video import decode_video_frame, frame_to_base64
@@ -112,6 +113,9 @@ class LanceViewerAdapter(ViewerAdapter):
         if frame is None:
             return None
         return {"data_uri": frame_to_base64(frame)}
+
+    def get_cma_frame_payload(self, state: TrajectoryState, frame_idx: int) -> CmaFramePayload:
+        return get_cma_frame_data(state.lance_row, frame_idx)
 
     def get_curve_options(self, state: TrajectoryState) -> list[str]:
         return get_curve_options(state)

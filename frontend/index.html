@@ -196,12 +196,22 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
 .pose-axis-y { color: #51cf66; }
 .pose-axis-z { color: #60a5fa; }
 
-/* ── 视频 ── */
+/* ── 右侧：CMA + 视频 ── */
 #video-panel {
   grid-column: 3; grid-row: 1;
-  background: #ffffff; border-radius: 6px; border: 1px solid #dee2e6; display: flex; flex-direction: column; overflow: hidden;
+  display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 3px; overflow: hidden;
 }
-#video-title { color: #1890ff; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; padding: 6px 10px; border-bottom: 1px solid #dee2e6; flex-shrink: 0; }
+.media-pane {
+  background: #ffffff; border-radius: 6px; border: 1px solid #dee2e6;
+  display: flex; flex-direction: column; overflow: hidden; min-height: 0;
+}
+.media-title { color: #1890ff; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; padding: 6px 10px; border-bottom: 1px solid #dee2e6; flex-shrink: 0; }
+#cma-wrap { flex: 1; position: relative; background: #111827; min-height: 0; overflow: hidden; }
+#cma-canvas { width: 100%; height: 100%; display: block; }
+#cma-none {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: #9ca3af; font-size: 12px; background: #111827;
+}
 #video-wrap { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 #video-img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
 #video-none { color: #bfbfbf; font-size: 12px; }
@@ -337,12 +347,21 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
     <div id="viewport-hint">左键旋转 · 右键平移 · 滚轮缩放</div>
   </div>
 
-  <!-- 视频 -->
+  <!-- CMA + 视频 -->
   <div id="video-panel">
-    <div id="video-title">📹 视频流</div>
-    <div id="video-wrap">
-      <img id="video-img" alt="">
-      <span id="video-none">无视频</span>
+    <div class="media-pane">
+      <div class="media-title">CMA 原始数据</div>
+      <div id="cma-wrap">
+        <canvas id="cma-canvas"></canvas>
+        <span id="cma-none">无 CMA 数据</span>
+      </div>
+    </div>
+    <div class="media-pane">
+      <div class="media-title">视频流</div>
+      <div id="video-wrap">
+        <img id="video-img" alt="">
+        <span id="video-none">无视频</span>
+      </div>
     </div>
   </div>
 
@@ -722,6 +741,141 @@ ro.observe(viewport);
 })();
 
 // ════════════════════════════════════════════════════════
+// CMA 原始数据小视口
+// ════════════════════════════════════════════════════════
+const cmaRenderer = new THREE.WebGLRenderer({ canvas: $('cma-canvas'), antialias: true, alpha: false });
+cmaRenderer.setPixelRatio(window.devicePixelRatio);
+cmaRenderer.setClearColor(0x111827);
+
+const cmaScene = new THREE.Scene();
+const cmaCamera = new THREE.PerspectiveCamera(42, 1, 0.001, 100);
+cmaCamera.position.set(0.8, 0.7, -0.8);
+cmaCamera.lookAt(0, 0.15, 0);
+cmaScene.add(new THREE.AmbientLight(0xffffff, 0.75));
+const cmaLight = new THREE.DirectionalLight(0xffffff, 0.8);
+cmaLight.position.set(1, 2, -1);
+cmaScene.add(cmaLight);
+const cmaGrid = new THREE.GridHelper(1, 10, 0x374151, 0x1f2937);
+cmaScene.add(cmaGrid);
+
+const cmaMarkers = new THREE.Points(
+  new THREE.BufferGeometry(),
+  new THREE.PointsMaterial({ color: 0x22d3ee, size: 0.012, sizeAttenuation: true })
+);
+cmaScene.add(cmaMarkers);
+
+const cmaBodyAxes = new THREE.LineSegments(
+  new THREE.BufferGeometry(),
+  new THREE.LineBasicMaterial({ vertexColors: true })
+);
+cmaScene.add(cmaBodyAxes);
+
+const cmaBounds = new THREE.Box3();
+const cmaTmp = new THREE.Vector3();
+const cmaDataQuat = new THREE.Quaternion();
+
+function cmaPointToThree(x, y, z) {
+  return new THREE.Vector3(x, z, -y);
+}
+
+function cmaVecToThree(v) {
+  return new THREE.Vector3(v.x, v.z, -v.y);
+}
+
+function setCmaUnavailable() {
+  $('cma-none').style.display = 'flex';
+  cmaMarkers.visible = false;
+  cmaBodyAxes.visible = false;
+}
+
+function fitCmaCamera(points) {
+  if (!points.length) return;
+  cmaBounds.makeEmpty();
+  points.forEach(p => cmaBounds.expandByPoint(p));
+  cmaBounds.getCenter(cmaTmp);
+  const sphere = new THREE.Sphere();
+  cmaBounds.getBoundingSphere(sphere);
+  const radius = Math.max(0.12, sphere.radius);
+  cmaCamera.position.set(
+    cmaTmp.x + radius * 2.2,
+    cmaTmp.y + radius * 1.7,
+    cmaTmp.z - radius * 2.2
+  );
+  cmaCamera.near = Math.max(0.001, radius / 100);
+  cmaCamera.far = Math.max(10, radius * 20);
+  cmaCamera.lookAt(cmaTmp);
+  cmaCamera.updateProjectionMatrix();
+}
+
+function applyCma(d) {
+  if (!d || !d.available) {
+    setCmaUnavailable();
+    return;
+  }
+  $('cma-none').style.display = 'none';
+
+  const fitPoints = [];
+  const markers = d.human_markers;
+  if (markers && markers.x && markers.x.length) {
+    const pos = new Float32Array(markers.x.length * 3);
+    for (let i = 0; i < markers.x.length; i++) {
+      const p = cmaPointToThree(markers.x[i], markers.y[i], markers.z[i]);
+      pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z;
+      fitPoints.push(p);
+    }
+    cmaMarkers.geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    cmaMarkers.visible = true;
+  } else {
+    cmaMarkers.visible = false;
+  }
+
+  const axesPos = [];
+  const axesColor = [];
+  const axisSpecs = [
+    [new THREE.Vector3(1, 0, 0), [1.0, 0.42, 0.42]],
+    [new THREE.Vector3(0, 1, 0), [0.32, 0.81, 0.4]],
+    [new THREE.Vector3(0, 0, 1), [0.38, 0.65, 0.98]],
+  ];
+  (d.bodies || []).forEach(body => {
+    const p = body.position;
+    const q = body.quaternion;
+    if (!p || !q) return;
+    const origin = cmaPointToThree(p[0], p[1], p[2]);
+    fitPoints.push(origin);
+    cmaDataQuat.set(q[0], q[1], q[2], q[3]).normalize();
+    axisSpecs.forEach(([axis, color]) => {
+      const tip = cmaVecToThree(axis.clone().applyQuaternion(cmaDataQuat).multiplyScalar(0.08)).add(origin);
+      axesPos.push(origin.x, origin.y, origin.z, tip.x, tip.y, tip.z);
+      axesColor.push(...color, ...color);
+      fitPoints.push(tip);
+    });
+  });
+  if (axesPos.length) {
+    cmaBodyAxes.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(axesPos), 3));
+    cmaBodyAxes.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(axesColor), 3));
+    cmaBodyAxes.visible = true;
+  } else {
+    cmaBodyAxes.visible = false;
+  }
+  fitCmaCamera(fitPoints);
+}
+
+const cmaViewport = $('cma-wrap');
+const cmaRo = new ResizeObserver(() => {
+  const w = cmaViewport.clientWidth, h = cmaViewport.clientHeight;
+  cmaRenderer.setSize(w, h, false);
+  cmaCamera.aspect = w / Math.max(1, h);
+  cmaCamera.updateProjectionMatrix();
+});
+cmaRo.observe(cmaViewport);
+setCmaUnavailable();
+
+(function cmaRenderLoop() {
+  requestAnimationFrame(cmaRenderLoop);
+  cmaRenderer.render(cmaScene, cmaCamera);
+})();
+
+// ════════════════════════════════════════════════════════
 // API 调用
 // ════════════════════════════════════════════════════════
 function apply3D(d) {
@@ -768,7 +922,7 @@ async function refreshFrame() {
   });
 
   try {
-    const [d3, dv] = await Promise.all([
+    const [d3, dv, dcma] = await Promise.all([
       (async () => {
         const p = new URLSearchParams({
           show_mano_mesh:   $('cb-mano-mesh').checked,
@@ -785,12 +939,18 @@ async function refreshFrame() {
         return fetchWithSig(withSession(`./api/video/${S.trajIndex}/${$('cam-select').value || 0}/${S.frameIdx}?stream=${$('stream-select').value}`))
           .catch(() => null);
       })(),
+      (async () => {
+        if (S.trajIndex === null) return null;
+        return fetchWithSig(withSession(`./api/cma/${S.trajIndex}/${S.frameIdx}`))
+          .catch(() => null);
+      })(),
     ]);
 
     // 如果有更新的请求已经发出，丢弃本次结果
     if (seq !== _frameSeq) return;
 
     apply3D(d3);
+    applyCma(dcma);
     if (dv) {
       $('video-img').src = dv.data_uri;
       $('video-img').style.display = 'block';
@@ -801,6 +961,7 @@ async function refreshFrame() {
     }
   } catch (e) {
     if (e.name === 'AbortError') return;  // 正常取消，忽略
+    setCmaUnavailable();
   }
   drawCurve();
 }
@@ -949,6 +1110,7 @@ function clearTrajectoryVisuals() {
   $('curve-select').innerHTML = '';
   $('video-img').style.display = 'none';
   $('video-none').style.display = '';
+  setCmaUnavailable();
   $('object-pose-overlay').classList.add('hidden');
   Object.values(OBJ).forEach(obj => { obj.visible = false; });
   objectPoseAxes.visible = false;

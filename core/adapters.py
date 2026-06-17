@@ -65,6 +65,16 @@ class FramePayload(TypedDict, total=False):
     show_origin: bool
 
 
+class CmaFramePayload(TypedDict, total=False):
+    available: bool
+    frame_idx: int
+    total_frames: int
+    frame_counter: int | float | None
+    timestamp_ms: int | float | None
+    human_markers: PointsPayload | None
+    bodies: list[dict[str, Any]]
+
+
 class LoadPayload(TypedDict, total=False):
     total_frames: int
     num_cameras: int
@@ -129,6 +139,9 @@ class ViewerAdapter(Protocol):
     ) -> dict[str, Any] | None:
         ...
 
+    def get_cma_frame_payload(self, state: Any, frame_idx: int) -> CmaFramePayload:
+        ...
+
     def get_curve_options(self, state: Any) -> list[str]:
         ...
 
@@ -182,6 +195,9 @@ class EmptyViewerAdapter:
         frame_idx: int,
         stream: str = "color",
     ) -> dict[str, Any] | None:
+        raise RuntimeError("请先选择 Lance 数据源")
+
+    def get_cma_frame_payload(self, state: Any, frame_idx: int) -> CmaFramePayload:
         raise RuntimeError("请先选择 Lance 数据源")
 
     def get_curve_options(self, state: Any) -> list[str]:
