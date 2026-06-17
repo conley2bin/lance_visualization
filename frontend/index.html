@@ -135,7 +135,7 @@ body {
 /* ── 主体 ── */
 #main {
   flex: 1; display: grid;
-  grid-template-columns: 210px 0.9fr 460px;
+  grid-template-columns: 210px minmax(360px, 3fr) minmax(560px, 2fr);
   grid-template-rows: 1fr 190px;
   gap: 3px; padding: 3px; overflow: hidden; min-height: 0;
 }
@@ -212,8 +212,18 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   color: #9ca3af; font-size: 12px; background: #111827;
 }
+#cma-pose-overlay {
+  position: absolute; top: 7px; left: 7px; z-index: 3; pointer-events: none;
+  min-width: 210px; max-width: min(300px, calc(100% - 14px));
+  background: rgba(12, 18, 27, 0.82); border: 1px solid rgba(148, 163, 184, 0.28);
+  color: #e5edf7; border-radius: 6px; padding: 7px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+#cma-pose-overlay.hidden { display: none; }
+#cma-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+#cma-hint { position: absolute; bottom: 5px; right: 7px; color: #9ca3af; font-size: 10px; pointer-events: none; }
 #video-wrap { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-#video-img { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
+#video-img { width: 100%; height: 100%; object-fit: cover; display: none; }
 #video-none { color: #bfbfbf; font-size: 12px; }
 
 /* ── 底部：曲线图 ── */
@@ -225,7 +235,7 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
 
 /* 曲线图 */
 #curve-wrap { padding: 8px 10px; height: 100%; display: flex; flex-direction: column; gap: 4px; }
-#curve-canvas { width: 100%; flex: 1; }
+#curve-canvas { width: 100%; height: 100%; min-height: 0; flex: 1; display: block; }
 
 /* ── 加载遮罩 ── */
 #loading {
@@ -353,6 +363,26 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
       <div class="media-title">CMA 原始数据</div>
       <div id="cma-wrap">
         <canvas id="cma-canvas"></canvas>
+        <div id="cma-pose-overlay" class="hidden">
+          <div class="pose-title"><span>body pose</span><span>cma raw</span></div>
+          <div class="pose-grid">
+            <span class="pose-label">pos</span>
+            <span id="cma-pos-x" class="pose-value">--</span>
+            <span id="cma-pos-y" class="pose-value">--</span>
+            <span id="cma-pos-z" class="pose-value">--</span>
+            <span class="pose-label">rot_aa</span>
+            <span id="cma-rot-x" class="pose-value">--</span>
+            <span id="cma-rot-y" class="pose-value">--</span>
+            <span id="cma-rot-z" class="pose-value">--</span>
+          </div>
+          <div class="pose-axis-legend">
+            <span class="pose-axis-x">X</span>
+            <span class="pose-axis-y">Y</span>
+            <span class="pose-axis-z">Z</span>
+          </div>
+        </div>
+        <div id="cma-labels"></div>
+        <div id="cma-hint">左键旋转 · 右键平移 · 滚轮缩放</div>
         <span id="cma-none">无 CMA 数据</span>
       </div>
     </div>
@@ -758,52 +788,182 @@ cmaScene.add(cmaLight);
 const cmaGrid = new THREE.GridHelper(1, 10, 0x374151, 0x1f2937);
 cmaScene.add(cmaGrid);
 
-const cmaMarkers = new THREE.Points(
-  new THREE.BufferGeometry(),
-  new THREE.PointsMaterial({ color: 0x22d3ee, size: 0.012, sizeAttenuation: true })
-);
-cmaScene.add(cmaMarkers);
+function makeCmaPointsObj(color, size = 0.012) {
+  const g = new THREE.BufferGeometry();
+  const m = new THREE.PointsMaterial({ color, size, sizeAttenuation: true });
+  const o = new THREE.Points(g, m);
+  o.visible = false;
+  cmaScene.add(o);
+  return o;
+}
+function makeCmaLineObj(color, opacity = 0.86) {
+  const g = new THREE.BufferGeometry();
+  const m = new THREE.LineBasicMaterial({ color, opacity, transparent: opacity < 1 });
+  const o = new THREE.LineSegments(g, m);
+  o.visible = false;
+  cmaScene.add(o);
+  return o;
+}
 
-const cmaBodyAxes = new THREE.LineSegments(
-  new THREE.BufferGeometry(),
-  new THREE.LineBasicMaterial({ vertexColors: true })
-);
-cmaScene.add(cmaBodyAxes);
+const CMA_OBJ = {
+  humanMarkers: makeCmaPointsObj(0x6ec6f5, 0.012),
+  humanLines: makeCmaLineObj(0x8dd7ff, 0.82),
+  bodyMarkers: makeCmaPointsObj(0xfbbf24, 0.012),
+};
 
 const cmaBounds = new THREE.Box3();
 const cmaTmp = new THREE.Vector3();
-const cmaDataQuat = new THREE.Quaternion();
+const cmaNdc = new THREE.Vector3();
+let cmaAxesLength = 0.12;
+let cmaLastFitKey = '';
+let cmaLastFitPoints = [];
 
 function cmaPointToThree(x, y, z) {
   return new THREE.Vector3(x, z, -y);
 }
 
-function cmaVecToThree(v) {
-  return new THREE.Vector3(v.x, v.z, -v.y);
+function makeCmaPoseAxes() {
+  const group = new THREE.Group();
+  [
+    ['x', 0xff6b6b],
+    ['y', 0x51cf66],
+    ['z', 0x60a5fa],
+  ].forEach(([key, color]) => {
+    const arrow = new THREE.ArrowHelper(
+      OBJECT_AXIS_DIRECTIONS[key],
+      new THREE.Vector3(0, 0, 0),
+      cmaAxesLength,
+      color,
+      cmaAxesLength * 0.22,
+      cmaAxesLength * 0.08
+    );
+    arrow.userData.axisKey = key;
+    arrow.traverse(child => {
+      if (child.material) {
+        child.material.depthTest = false;
+        child.material.depthWrite = false;
+      }
+      child.renderOrder = 20;
+    });
+    group.add(arrow);
+  });
+  group.visible = false;
+  cmaScene.add(group);
+  return group;
+}
+
+const cmaPoseAxes = makeCmaPoseAxes();
+const cmaAxisLabels = ['x', 'y', 'z'].map(key => {
+  const el = document.createElement('div');
+  el.className = `axis-lbl object-axis-lbl pose-axis-${key}`;
+  el.textContent = `obj ${key.toUpperCase()}`;
+  $('cma-labels').appendChild(el);
+  return { key, el, world: new THREE.Vector3() };
+});
+
+function setCmaAxesLength(length) {
+  cmaAxesLength = Math.max(0.035, Math.min(0.18, length || 0.12));
+  cmaPoseAxes.children.forEach(arrow => {
+    arrow.setLength(cmaAxesLength, cmaAxesLength * 0.22, cmaAxesLength * 0.08);
+  });
+}
+
+function setCmaPoints(obj, data) {
+  if (!data) { obj.visible = false; return []; }
+  const points = [];
+  const pos = new Float32Array(data.x.length * 3);
+  for (let i = 0; i < data.x.length; i++) {
+    const p = cmaPointToThree(data.x[i], data.y[i], data.z[i]);
+    pos[i*3] = p.x; pos[i*3+1] = p.y; pos[i*3+2] = p.z;
+    points.push(p);
+  }
+  obj.geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  obj.geometry.attributes.position.needsUpdate = true;
+  obj.visible = true;
+  return points;
+}
+
+function setCmaLineSegments(obj, data) {
+  if (!data || !data.x || data.x.length < 2) { obj.visible = false; return []; }
+  const points = [];
+  const pos = new Float32Array(data.x.length * 3);
+  for (let i = 0; i < data.x.length; i++) {
+    const p = cmaPointToThree(data.x[i], data.y[i], data.z[i]);
+    pos[i*3] = p.x; pos[i*3+1] = p.y; pos[i*3+2] = p.z;
+    points.push(p);
+  }
+  obj.geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  obj.geometry.attributes.position.needsUpdate = true;
+  obj.visible = true;
+  return points;
+}
+
+function updateCmaPoseOverlay(pose) {
+  const overlay = $('cma-pose-overlay');
+  if (!pose) {
+    overlay.classList.add('hidden');
+    return;
+  }
+  overlay.classList.remove('hidden');
+  const fmt = v => Number.isFinite(v) ? v.toFixed(5) : '--';
+  $('cma-pos-x').textContent = fmt(pose.pos[0]);
+  $('cma-pos-y').textContent = fmt(pose.pos[1]);
+  $('cma-pos-z').textContent = fmt(pose.pos[2]);
+  $('cma-rot-x').textContent = fmt(pose.rot_aa[0]);
+  $('cma-rot-y').textContent = fmt(pose.rot_aa[1]);
+  $('cma-rot-z').textContent = fmt(pose.rot_aa[2]);
+}
+
+function setCmaPoseAxes(pose) {
+  const visible = !!pose;
+  cmaPoseAxes.visible = visible;
+  if (!visible) return;
+  applyObjectPose(cmaPoseAxes, pose);
+}
+
+function updateCmaAxisLabels() {
+  const W = cmaViewport.clientWidth, H = cmaViewport.clientHeight;
+  cmaAxisLabels.forEach(item => {
+    if (!cmaPoseAxes.visible) {
+      item.el.style.display = 'none';
+      return;
+    }
+    item.world.copy(OBJECT_AXIS_DIRECTIONS[item.key]).multiplyScalar(cmaAxesLength * 1.15);
+    cmaPoseAxes.localToWorld(item.world);
+    cmaNdc.copy(item.world).project(cmaCamera);
+    if (cmaNdc.z > 1 || cmaNdc.z < -1) {
+      item.el.style.display = 'none';
+    } else {
+      item.el.style.display = '';
+      item.el.style.top = ((1 - (cmaNdc.y + 1) * 0.5) * H) + 'px';
+      item.el.style.left = ((cmaNdc.x + 1) * 0.5 * W) + 'px';
+    }
+  });
 }
 
 function setCmaUnavailable() {
   $('cma-none').style.display = 'flex';
-  cmaMarkers.visible = false;
-  cmaBodyAxes.visible = false;
+  Object.values(CMA_OBJ).forEach(obj => { obj.visible = false; });
+  cmaPoseAxes.visible = false;
+  cmaAxisLabels.forEach(item => { item.el.style.display = 'none'; });
+  $('cma-pose-overlay').classList.add('hidden');
+  cmaLastFitKey = '';
+  cmaLastFitPoints = [];
 }
 
-function fitCmaCamera(points) {
-  if (!points.length) return;
+function fitCmaCamera(points, fitKey) {
+  if (!points.length || fitKey === cmaLastFitKey) return;
+  cmaLastFitKey = fitKey;
   cmaBounds.makeEmpty();
   points.forEach(p => cmaBounds.expandByPoint(p));
   cmaBounds.getCenter(cmaTmp);
   const sphere = new THREE.Sphere();
   cmaBounds.getBoundingSphere(sphere);
   const radius = Math.max(0.12, sphere.radius);
-  cmaCamera.position.set(
-    cmaTmp.x + radius * 2.2,
-    cmaTmp.y + radius * 1.7,
-    cmaTmp.z - radius * 2.2
-  );
+  cmaLastFitPoints = points.map(p => p.clone());
+  cmaOrbit.setTarget(cmaTmp, radius);
   cmaCamera.near = Math.max(0.001, radius / 100);
   cmaCamera.far = Math.max(10, radius * 20);
-  cmaCamera.lookAt(cmaTmp);
   cmaCamera.updateProjectionMatrix();
 }
 
@@ -815,57 +975,78 @@ function applyCma(d) {
   $('cma-none').style.display = 'none';
 
   const fitPoints = [];
-  const markers = d.human_markers;
-  if (markers && markers.x && markers.x.length) {
-    const pos = new Float32Array(markers.x.length * 3);
-    for (let i = 0; i < markers.x.length; i++) {
-      const p = cmaPointToThree(markers.x[i], markers.y[i], markers.z[i]);
-      pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z;
-      fitPoints.push(p);
-    }
-    cmaMarkers.geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    cmaMarkers.visible = true;
-  } else {
-    cmaMarkers.visible = false;
-  }
-
-  const axesPos = [];
-  const axesColor = [];
-  const axisSpecs = [
-    [new THREE.Vector3(1, 0, 0), [1.0, 0.42, 0.42]],
-    [new THREE.Vector3(0, 1, 0), [0.32, 0.81, 0.4]],
-    [new THREE.Vector3(0, 0, 1), [0.38, 0.65, 0.98]],
-  ];
-  (d.bodies || []).forEach(body => {
-    const p = body.position;
-    const q = body.quaternion;
-    if (!p || !q) return;
-    const origin = cmaPointToThree(p[0], p[1], p[2]);
+  fitPoints.push(...setCmaPoints(CMA_OBJ.humanMarkers, d.human_markers));
+  fitPoints.push(...setCmaLineSegments(CMA_OBJ.humanLines, d.human_lines));
+  fitPoints.push(...setCmaPoints(CMA_OBJ.bodyMarkers, d.body_markers));
+  const objectPose = d.object_pose || (
+    d.object_transform
+      ? { pos: d.object_transform.position, rot_aa: d.object_transform.rotation }
+      : null
+  );
+  updateCmaPoseOverlay(objectPose);
+  setCmaPoseAxes(objectPose);
+  if (objectPose) {
+    const origin = cmaPointToThree(objectPose.pos[0], objectPose.pos[1], objectPose.pos[2]);
     fitPoints.push(origin);
-    cmaDataQuat.set(q[0], q[1], q[2], q[3]).normalize();
-    axisSpecs.forEach(([axis, color]) => {
-      const tip = cmaVecToThree(axis.clone().applyQuaternion(cmaDataQuat).multiplyScalar(0.08)).add(origin);
-      axesPos.push(origin.x, origin.y, origin.z, tip.x, tip.y, tip.z);
-      axesColor.push(...color, ...color);
-      fitPoints.push(tip);
-    });
-  });
-  if (axesPos.length) {
-    cmaBodyAxes.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(axesPos), 3));
-    cmaBodyAxes.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(axesColor), 3));
-    cmaBodyAxes.visible = true;
-  } else {
-    cmaBodyAxes.visible = false;
+    setCmaAxesLength(0.12);
   }
-  fitCmaCamera(fitPoints);
+  const fitKey = `${d.total_frames}:${d.human_markers?.x?.length || 0}:${d.body_markers?.x?.length || 0}`;
+  fitCmaCamera(fitPoints, fitKey);
 }
 
 const cmaViewport = $('cma-wrap');
+const cmaOrbit = (() => {
+  const sph = new THREE.Spherical(1.1, 0.91, 1.50);
+  const target = new THREE.Vector3(0, 0.15, 0);
+  let mouse = null;
+  const c = $('cma-canvas');
+  c.addEventListener('contextmenu', e => e.preventDefault());
+  c.addEventListener('mousedown', e => { mouse = { x: e.clientX, y: e.clientY, btn: e.button }; });
+  window.addEventListener('mouseup', () => { mouse = null; });
+  window.addEventListener('mousemove', e => {
+    if (!mouse) return;
+    const dx = e.clientX - mouse.x, dy = e.clientY - mouse.y;
+    mouse.x = e.clientX; mouse.y = e.clientY;
+    if (mouse.btn === 0) {
+      sph.theta -= dx * 0.008; sph.phi -= dy * 0.008;
+      sph.phi = Math.max(0.05, Math.min(Math.PI - 0.05, sph.phi));
+    } else if (mouse.btn === 2) {
+      const scale = sph.radius * 0.001;
+      const right = new THREE.Vector3();
+      const up = new THREE.Vector3();
+      cmaCamera.getWorldDirection(right);
+      right.crossVectors(cmaCamera.up, right).normalize();
+      up.copy(cmaCamera.up).normalize();
+      target.addScaledVector(right, dx * scale);
+      target.addScaledVector(up, dy * scale);
+    }
+    update();
+  });
+  c.addEventListener('wheel', e => {
+    e.preventDefault();
+    sph.radius = Math.max(0.04, sph.radius * (1 + e.deltaY * 0.001));
+    update();
+  }, { passive: false });
+  function update() {
+    cmaCamera.position.setFromSpherical(sph).add(target);
+    cmaCamera.lookAt(target);
+  }
+  function setTarget(center, radius) {
+    target.copy(center);
+    sph.radius = Math.max(0.18, radius * 3.2);
+    update();
+  }
+  update();
+  return { update, setTarget };
+})();
 const cmaRo = new ResizeObserver(() => {
   const w = cmaViewport.clientWidth, h = cmaViewport.clientHeight;
   cmaRenderer.setSize(w, h, false);
   cmaCamera.aspect = w / Math.max(1, h);
   cmaCamera.updateProjectionMatrix();
+  const fitKey = cmaLastFitKey;
+  cmaLastFitKey = '';
+  fitCmaCamera(cmaLastFitPoints, fitKey);
 });
 cmaRo.observe(cmaViewport);
 setCmaUnavailable();
@@ -873,6 +1054,7 @@ setCmaUnavailable();
 (function cmaRenderLoop() {
   requestAnimationFrame(cmaRenderLoop);
   cmaRenderer.render(cmaScene, cmaCamera);
+  updateCmaAxisLabels();
 })();
 
 // ════════════════════════════════════════════════════════
@@ -1037,7 +1219,9 @@ function drawCurve() {
 
 const cvRo = new ResizeObserver(() => {
   const c = $('curve-canvas');
-  c.width = c.offsetWidth; c.height = c.offsetHeight;
+  const rect = c.getBoundingClientRect();
+  c.width = Math.max(1, Math.floor(rect.width));
+  c.height = Math.max(1, Math.floor(rect.height));
   drawCurve();
 });
 cvRo.observe($('curve-canvas'));

@@ -12,6 +12,10 @@ def _unavailable() -> dict[str, Any]:
         "frame_counter": None,
         "timestamp_ms": None,
         "human_markers": None,
+        "human_lines": None,
+        "body_markers": None,
+        "object_pose": None,
+        "object_transform": None,
         "bodies": [],
     }
 
@@ -76,6 +80,90 @@ def _scalar_at(values: Any, frame_idx: int) -> int | float | None:
         return number if math.isfinite(number) else None
 
 
+def _display_name(raw: Any) -> str:
+    name = str(raw)
+    if name.startswith("Skeleton_"):
+        parts = name.split("_", 2)
+        if len(parts) == 3 and parts[1].isdigit():
+            return parts[2]
+    if name.startswith("Skeleton"):
+        parts = name.split("_", 1)
+        if len(parts) == 2 and parts[0][8:].isdigit():
+            return parts[1]
+    return name
+
+
+def _valid_point(point: list[float] | None) -> bool:
+    return bool(point and all(math.isfinite(v) for v in point) and math.hypot(*point) > 1e-9)
+
+
+def _points_payload(names: list[str], positions: list[list[float] | None]) -> dict[str, list] | None:
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    kept_names: list[str] = []
+    for name, point in zip(names, positions):
+        if not _valid_point(point):
+            continue
+        xs.append(float(point[0]))
+        ys.append(float(point[1]))
+        zs.append(float(point[2]))
+        kept_names.append(name)
+    if not xs:
+        return None
+    return {"x": xs, "y": ys, "z": zs, "names": kept_names}
+
+
+def _make_human_line_pairs(names: list[str]) -> list[tuple[int, int]]:
+    by_name = {name: i for i, name in enumerate(names)}
+    pairs: list[tuple[int, int]] = []
+    for side in ("LeftHand", "RightHand"):
+        root = side
+        for finger in ("Thumb", "Index", "Middle", "Ring", "Pinky"):
+            chain = [f"{side}{finger}{i}" for i in range(1, 5)]
+            if root in by_name and chain[0] in by_name:
+                pairs.append((by_name[root], by_name[chain[0]]))
+            for a, b in zip(chain, chain[1:]):
+                if a in by_name and b in by_name:
+                    pairs.append((by_name[a], by_name[b]))
+    return pairs
+
+
+def _human_lines_payload(names: list[str], positions: list[list[float] | None]) -> dict[str, list[float]] | None:
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    for start, end in _make_human_line_pairs(names):
+        a = positions[start] if start < len(positions) else None
+        b = positions[end] if end < len(positions) else None
+        if not _valid_point(a) or not _valid_point(b):
+            continue
+        xs.extend([float(a[0]), float(b[0])])
+        ys.extend([float(a[1]), float(b[1])])
+        zs.extend([float(a[2]), float(b[2])])
+    if not xs:
+        return None
+    return {"x": xs, "y": ys, "z": zs}
+
+
+def _quat_to_rotvec(quat: list[float] | None) -> list[float] | None:
+    if quat is None:
+        return None
+    x, y, z, w = quat
+    norm = math.sqrt(x * x + y * y + z * z + w * w)
+    if not math.isfinite(norm) or norm <= 1e-8:
+        return None
+    x, y, z, w = x / norm, y / norm, z / norm, w / norm
+    if w < 0:
+        x, y, z, w = -x, -y, -z, -w
+    sin_half = math.sqrt(x * x + y * y + z * z)
+    if sin_half <= 1e-8:
+        return [0.0, 0.0, 0.0]
+    angle = 2.0 * math.atan2(sin_half, w)
+    scale = angle / sin_half
+    return [x * scale, y * scale, z * scale]
+
+
 def get_cma_frame_data(lance_row: dict[str, Any], frame_idx: int) -> dict[str, Any]:
     cma_data = lance_row.get("cma_data")
     if not isinstance(cma_data, dict):
@@ -88,29 +176,26 @@ def get_cma_frame_data(lance_row: dict[str, Any], frame_idx: int) -> dict[str, A
         return _unavailable()
 
     frame_idx = max(0, min(int(frame_idx), total_frames - 1))
-    marker_names = [str(name) for name in _as_sequence(cma_data.get("human_marker_names"))]
-    marker_x: list[float] = []
-    marker_y: list[float] = []
-    marker_z: list[float] = []
-    visible_marker_names: list[str] = []
+    marker_names = [_display_name(name) for name in _as_sequence(cma_data.get("human_marker_names"))]
+    marker_positions: list[list[float] | None] = []
     for i, marker in enumerate(_frame_item(human_frames, frame_idx)):
         if not isinstance(marker, dict):
+            marker_positions.append(None)
             continue
-        position = _finite_xyz(marker.get("position"))
-        if position is None:
-            continue
-        marker_x.append(position[0])
-        marker_y.append(position[1])
-        marker_z.append(position[2])
-        visible_marker_names.append(marker_names[i] if i < len(marker_names) else f"marker_{i}")
+        marker_positions.append(_finite_xyz(marker.get("position")))
+    if len(marker_names) < len(marker_positions):
+        marker_names.extend(f"marker_{i}" for i in range(len(marker_names), len(marker_positions)))
 
-    body_names = [str(name) for name in _as_sequence(cma_data.get("body_names"))]
+    body_names = [_display_name(name) for name in _as_sequence(cma_data.get("body_names"))]
+    body_positions: list[list[float] | None] = []
     bodies = []
     for i, body in enumerate(_frame_item(body_frames, frame_idx)):
         if not isinstance(body, dict):
+            body_positions.append(None)
             continue
         position = _finite_xyz(body.get("position"))
         quaternion = _finite_quat(body.get("quaternion"))
+        body_positions.append(position)
         if position is None or quaternion is None:
             continue
         bodies.append({
@@ -118,8 +203,26 @@ def get_cma_frame_data(lance_row: dict[str, Any], frame_idx: int) -> dict[str, A
             "position": position,
             "quaternion": quaternion,
         })
+    if len(body_names) < len(body_positions):
+        body_names.extend(f"body_{i}" for i in range(len(body_names), len(body_positions)))
 
-    if not marker_x and not bodies:
+    human_markers = _points_payload(marker_names, marker_positions)
+    human_lines = _human_lines_payload(marker_names, marker_positions)
+    body_markers = _points_payload(body_names, body_positions)
+    object_pose = None
+    for body in bodies:
+        if body["name"].upper().startswith("CAMERA"):
+            continue
+        rot_aa = _quat_to_rotvec(body["quaternion"])
+        if rot_aa is not None:
+            object_pose = {"pos": body["position"], "rot_aa": rot_aa}
+            break
+    if object_pose is None and bodies:
+        rot_aa = _quat_to_rotvec(bodies[0]["quaternion"])
+        if rot_aa is not None:
+            object_pose = {"pos": bodies[0]["position"], "rot_aa": rot_aa}
+
+    if not human_markers and not body_markers and object_pose is None:
         result = _unavailable()
         result["frame_idx"] = frame_idx
         result["total_frames"] = total_frames
@@ -131,11 +234,13 @@ def get_cma_frame_data(lance_row: dict[str, Any], frame_idx: int) -> dict[str, A
         "total_frames": total_frames,
         "frame_counter": _scalar_at(cma_data.get("frame_counters"), frame_idx),
         "timestamp_ms": _scalar_at(cma_data.get("timestamp_ms"), frame_idx),
-        "human_markers": {
-            "x": marker_x,
-            "y": marker_y,
-            "z": marker_z,
-            "names": visible_marker_names,
-        } if marker_x else None,
+        "human_markers": human_markers,
+        "human_lines": human_lines,
+        "body_markers": body_markers,
+        "object_pose": object_pose,
+        "object_transform": {
+            "position": object_pose["pos"],
+            "rotation": object_pose["rot_aa"],
+        } if object_pose else None,
         "bodies": bodies,
     }
