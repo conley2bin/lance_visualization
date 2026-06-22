@@ -7,6 +7,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html {
   overscroll-behavior: none;
+  touch-action: none;
 }
 body {
   background: #e8eaed; color: #2c3e50;
@@ -416,7 +417,7 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
 import * as THREE from './static/three.module.min.js';
 
 function installBrowserGestureGuard() {
-  const isNavigationButton = e => e.button === 3 || e.button === 4;
+  const isSideButton = e => e.button === 3 || e.button === 4 || (e.buttons & 8) || (e.buttons & 16);
   const canScrollHorizontally = (target, deltaX) => {
     for (let el = target instanceof Element ? target : target?.parentElement; el && el !== document.body; el = el.parentElement) {
       const style = window.getComputedStyle(el);
@@ -426,14 +427,20 @@ function installBrowserGestureGuard() {
     }
     return false;
   };
-  const blockNavigationButton = e => {
-    if (!isNavigationButton(e)) return;
+  const blockSideButton = e => {
+    if (!isSideButton(e)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
   };
+  const blockRightButtonDefault = e => {
+    if (e.button === 2) e.preventDefault();
+  };
 
-  ['mousedown', 'mouseup', 'auxclick'].forEach(type => {
-    window.addEventListener(type, blockNavigationButton, true);
+  ['mousedown', 'mouseup', 'auxclick', 'click', 'pointerdown', 'pointerup'].forEach(type => {
+    window.addEventListener(type, blockSideButton, true);
+  });
+  ['mousedown', 'mouseup', 'pointerdown', 'pointerup'].forEach(type => {
+    window.addEventListener(type, blockRightButtonDefault, true);
   });
   window.addEventListener('contextmenu', e => e.preventDefault(), true);
   window.addEventListener('dragstart', e => e.preventDefault(), true);
