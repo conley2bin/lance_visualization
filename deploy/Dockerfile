@@ -1,7 +1,7 @@
 # ============================================
 # Lance 可视化 FastAPI 服务镜像
 # ============================================
-FROM 192.168.10.11/dockerhub/library/python:3.10
+FROM 183.195.186.154:180/dockerhub/library/python:3.10
 
 WORKDIR /app
 
@@ -21,9 +21,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl
 
 # 安装 uv
-ADD https://astral.sh/uv/install.sh /tmp/install-uv.sh
-RUN sh /tmp/install-uv.sh && rm /tmp/install-uv.sh
-ENV PATH="/root/.local/bin:$PATH"
+RUN python -m pip install --no-cache-dir -i "${UV_INDEX_URL}" uv
 
 # 安装 Python 依赖
 COPY deploy/requirements.txt .
