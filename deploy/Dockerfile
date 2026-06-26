@@ -5,9 +5,20 @@ FROM 183.195.186.154:180/dockerhub/library/python:3.10
 
 WORKDIR /app
 
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG PYTORCH_CPU_WHEEL_URL=https://download.pytorch.org/whl/cpu/torch-2.5.1%2Bcpu-cp310-cp310-linux_x86_64.whl
+
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
-    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=${NO_PROXY} \
+    http_proxy=${HTTP_PROXY} \
+    https_proxy=${HTTPS_PROXY} \
+    no_proxy=${NO_PROXY}
 
 # 系统依赖
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -29,6 +40,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --no-deps "${PYTORCH_CPU_WHEEL_URL}"
 
 # chumpy（需要禁用构建隔离）和 manotorch
 RUN --mount=type=cache,target=/root/.cache/uv \
