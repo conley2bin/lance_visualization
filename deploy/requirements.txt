@@ -21,6 +21,7 @@ tqdm
 
 # 科学计算
 scipy>=1.7.0
+six>=1.16.0
 
 # 深度学习（CPU-only）
 # PyTorch CPU 镜像源已在 Dockerfile 的 UV_EXTRA_INDEX_URL 中配置

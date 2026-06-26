@@ -33,7 +33,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # chumpy（需要禁用构建隔离）和 manotorch
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --no-build-isolation \
+    uv pip install --system --no-build-isolation --no-deps \
     git+https://github.com/mattloper/chumpy
 
 RUN --mount=type=cache,target=/root/.cache/uv \
