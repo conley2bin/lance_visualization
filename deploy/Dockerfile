@@ -7,8 +7,7 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
-    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
-    UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 系统依赖
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -30,6 +29,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu \
+    uv pip install --system \
+    "torch>=2.0.0" \
+    "torchvision>=0.15.0"
 
 # chumpy（需要禁用构建隔离）和 manotorch
 RUN --mount=type=cache,target=/root/.cache/uv \

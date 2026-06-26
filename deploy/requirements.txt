@@ -23,10 +23,7 @@ tqdm
 scipy>=1.7.0
 six>=1.16.0
 
-# 深度学习（CPU-only）
-# PyTorch CPU 镜像源已在 Dockerfile 的 UV_EXTRA_INDEX_URL 中配置
-torch>=2.0.0
-torchvision>=0.15.0
+# 深度学习（CPU-only，通过 Dockerfile 单独安装）
 
 # 3D 处理
 trimesh>=3.20.0
