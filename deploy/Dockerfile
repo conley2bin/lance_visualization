@@ -31,7 +31,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu \
+    UV_EXTRA_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pytorch-wheels/cpu \
     uv pip install --system \
     "torch>=2.0.0" \
     "torchvision>=0.15.0"
