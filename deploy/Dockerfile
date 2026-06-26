@@ -31,18 +31,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
 
-# chumpy 使用 PyPI 发布包，避免构建时直接 clone GitHub 受 TLS 波动影响。
+# chumpy（需要禁用构建隔离）和 manotorch
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --no-build-isolation \
-    chumpy==0.70
+    git+https://github.com/mattloper/chumpy
 
-# manotorch 暂无稳定 PyPI 发布包，保留 GitHub 安装并加重试。
 RUN --mount=type=cache,target=/root/.cache/uv \
-    for attempt in 1 2 3 4 5; do \
-        uv pip install --system git+https://github.com/lixiny/manotorch.git && break; \
-        if [ "$attempt" = "5" ]; then exit 1; fi; \
-        sleep 5; \
-    done
+    uv pip install --system \
+    git+https://github.com/lixiny/manotorch.git
 
 # 复制应用代码（build context 为项目根目录）
 COPY app.py .
