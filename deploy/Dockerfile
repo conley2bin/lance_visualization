@@ -30,12 +30,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_EXTRA_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pytorch-wheels/cpu \
-    uv pip install --system \
-    "torch>=2.0.0" \
-    "torchvision>=0.15.0"
-
 # chumpy（需要禁用构建隔离）和 manotorch
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system --no-build-isolation --no-deps \
