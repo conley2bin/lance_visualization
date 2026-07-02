@@ -45,6 +45,22 @@ def _resolve_mano_model_path(mano_model_path: str, hand: str, project_root: Path
     return str(candidates[0])
 
 
+def _resolve_urdf_path(project_root: Path, operator: str, hand: str) -> Path | None:
+    operator_dir = project_root / "assets" / "operators" / operator
+    if hand == "left":
+        candidates = [
+            operator_dir / "left" / "mano_hand.urdf",
+            operator_dir / "mano_left_hand.urdf",
+        ]
+    else:
+        candidates = [
+            operator_dir / "right" / "mano_hand.urdf",
+            operator_dir / "mano_right_hand.urdf",
+            operator_dir / "mano_hand.urdf",
+        ]
+    return next((path for path in candidates if path.exists()), None)
+
+
 def _load_object_mesh(project_root: Path, object_name: str) -> dict | None:
     objects_dir = project_root / "assets/objects"
     if not object_name or not objects_dir.exists():
@@ -105,7 +121,6 @@ class TrajectoryState:
         hand_names = _as_list(meta.get("hand_names"))
         mano_shapes = _as_list(meta.get("mano_hand_shapes"))
         operator = (lance_row.get("index") or {}).get("operator", "")
-        urdf_path = project_root / f"assets/operators/{operator}/mano_hand.urdf"
 
         for idx, hand_row in enumerate(hand_rows):
             hand_name = _normalize_hand_name(
@@ -135,7 +150,8 @@ class TrajectoryState:
                 "urdf_helper": None,
             }
 
-            if urdf_path.exists():
+            urdf_path = _resolve_urdf_path(project_root, operator, hand_name)
+            if urdf_path is not None:
                 helper = URDFHelper(str(urdf_path))
                 if helper.model is not None:
                     hand_state["urdf_helper"] = helper
