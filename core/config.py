@@ -71,7 +71,14 @@ def get_project_root(config: dict = None) -> Path:
     """返回 assets 等资源的根目录，优先读取环境变量，其次配置文件。"""
     val = os.environ.get("PROJECT_ROOT")
     if val:
-        return Path(val)
+        path = Path(val)
+        if path.exists():
+            return path
     if config:
-        return Path(config.get("paths", {}).get("project_root", "/app"))
-    return Path("/app")
+        path = Path(config.get("paths", {}).get("project_root", "/app"))
+        if path.exists():
+            return path
+    repo_root = Path(__file__).parent.parent
+    if (repo_root / "assets").exists():
+        return repo_root
+    return Path(val or (config or {}).get("paths", {}).get("project_root", "/app"))

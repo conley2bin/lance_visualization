@@ -55,11 +55,13 @@ class FramePayload(TypedDict, total=False):
     total_frames: int
     scene: str
     title: str
+    hands: list[dict[str, Any]]
     mano_mesh: MeshPayload | None
     mano_joints: PointsPayload | None
     urdf_joints: PointsPayload | None
     urdf_meshes: list[MeshPayload] | None
     object_mesh: MeshPayload | None
+    object_poses: list[dict[str, Any]]
     object_transform: ObjectTransformPayload | None
     object_pose: ObjectPosePayload | None
     show_origin: bool
@@ -78,7 +80,11 @@ class CmaFramePayload(TypedDict, total=False):
 class LoadPayload(TypedDict, total=False):
     total_frames: int
     num_cameras: int
+    num_hands: int
+    hand_names: list[str]
     has_urdf: bool
+    object_names: list[str]
+    missing_object_meshes: list[str]
     has_object_mesh: bool
     curve_options: list[str]
     label: str

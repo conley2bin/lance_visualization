@@ -59,8 +59,14 @@ class LanceViewerAdapter(ViewerAdapter):
             **info,
             "total_frames": state.T,
             "num_cameras": video_info["num_cameras"],
-            "has_urdf": state.urdf_helper is not None,
-            "has_object_mesh": state.object_mesh is not None,
+            "num_hands": len(state.hands),
+            "hand_names": state.hand_names,
+            "has_urdf": any(h["urdf_helper"] is not None for h in state.hands),
+            "object_names": [obj["name"] for obj in state.objects],
+            "missing_object_meshes": [
+                obj["name"] for obj in state.objects if obj["mesh"] is None
+            ],
+            "has_object_mesh": any(obj["mesh"] is not None for obj in state.objects),
             "curve_options": self.get_curve_options(state),
         }
 

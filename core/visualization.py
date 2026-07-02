@@ -8,10 +8,78 @@ from pathlib import Path
 
 import numpy as np
 import trimesh
-from scipy.spatial.transform import Rotation
 
 from .mano import generate_mano_vertices, load_mano_faces, transform_mano_to_world
 from .urdf_helper import URDFHelper
+
+
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _normalize_hand_name(name: str | None, fallback: str) -> str:
+    value = str(name or "").lower()
+    if "left" in value:
+        return "left"
+    if "right" in value:
+        return "right"
+    fallback_value = str(fallback or "").lower()
+    if fallback_value in {"left", "right"}:
+        return fallback_value
+    return value or fallback_value or "right"
+
+
+def _resolve_mano_model_path(mano_model_path: str, hand: str, project_root: Path) -> str:
+    side = "LEFT" if hand == "left" else "RIGHT"
+    requested = Path(mano_model_path) if mano_model_path else None
+    candidates = [
+        project_root / "assets" / "models" / f"MANO_{side}.pkl",
+    ]
+    if requested is not None:
+        if requested.name:
+            candidates.append(requested.with_name(f"MANO_{side}.pkl"))
+        candidates.append(requested)
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return str(candidates[0])
+
+
+def _load_object_mesh(project_root: Path, object_name: str) -> dict | None:
+    objects_dir = project_root / "assets/objects"
+    if not object_name or not objects_dir.exists():
+        return None
+
+    # 用 assets/objects 中的目录名做前缀匹配，兼容 cuboid2H → cuboid2 等变体
+    known = sorted([d.name for d in objects_dir.iterdir() if d.is_dir()], key=len, reverse=True)
+    matched = next((n for n in known if object_name.startswith(n)), None) or object_name
+    obj_paths = [
+        objects_dir / matched / f"{matched}_aligned.stl",
+        objects_dir / f"{matched}_aligned.stl",
+    ]
+    for obj_path in obj_paths:
+        if obj_path.exists():
+            try:
+                mesh = trimesh.load(str(obj_path))
+                mesh.vertices = mesh.vertices * 0.001  # mm → m
+                return {
+                    "vertices": np.asarray(mesh.vertices, dtype=np.float32),
+                    "faces": np.asarray(mesh.faces, dtype=np.int32),
+                }
+            except Exception:
+                pass
+    return None
+
+
+def _mesh_payload(vertices: np.ndarray, faces: np.ndarray) -> dict:
+    return {
+        "x": vertices[:, 0].tolist(),
+        "y": vertices[:, 1].tolist(),
+        "z": vertices[:, 2].tolist(),
+        "i": faces[:, 0].tolist(),
+        "j": faces[:, 1].tolist(),
+        "k": faces[:, 2].tolist(),
+    }
 
 
 class TrajectoryState:
@@ -27,63 +95,92 @@ class TrajectoryState:
         hand: str,
         project_root: Path,
     ):
-        hands = lance_row["hands"][0]
-        objects = lance_row["objects"][0]
-
         self.lance_row = lance_row
-        self.hand = hand
+        self.hand = _normalize_hand_name(hand, "right")
+        self.hands: list[dict] = []
+        self.objects: list[dict] = []
+        meta = lance_row.get("trajectory_metadata") or {}
 
-        # MANO
-        mano_beta = np.array(
-            lance_row["trajectory_metadata"]["mano_hand_shapes"][0], dtype=np.float32
-        )
-        mano_joint_pos = np.array(hands["mano_joint_pos"], dtype=np.float32)
-        self.T = mano_joint_pos.shape[0]
-        self.mano_joints = mano_joint_pos.reshape(self.T, 21, 3)
-        self.global_orient = np.array(hands["mano_global_rot_aa"], dtype=np.float32)
-        self.transl = np.array(hands["mano_global_pos"], dtype=np.float32)
-        hand_pose = np.array(hands["mano_hand_pose"], dtype=np.float32)
-
-        self.mano_vertices = generate_mano_vertices(
-            mano_model_path, hand, mano_beta, hand_pose, self.T
-        )
-        self.mano_faces = load_mano_faces(mano_model_path)
-
-        # URDF
-        self.urdf_dof = np.array(hands["urdf_dof"], dtype=np.float32)
-        operator = lance_row["index"]["operator"]
+        hand_rows = _as_list(lance_row.get("hands"))
+        hand_names = _as_list(meta.get("hand_names"))
+        mano_shapes = _as_list(meta.get("mano_hand_shapes"))
+        operator = (lance_row.get("index") or {}).get("operator", "")
         urdf_path = project_root / f"assets/operators/{operator}/mano_hand.urdf"
-        self.urdf_helper: URDFHelper | None = None
-        if urdf_path.exists():
-            h = URDFHelper(str(urdf_path))
-            if h.model is not None:
-                self.urdf_helper = h
 
-        # Object
-        self.obj_pos = np.array(objects["pos"], dtype=np.float32)
-        self.obj_rot_aa = np.array(objects["rot_aa"], dtype=np.float32)
+        for idx, hand_row in enumerate(hand_rows):
+            hand_name = _normalize_hand_name(
+                hand_names[idx] if idx < len(hand_names) else None,
+                self.hand if idx == 0 else "right",
+            )
+            mano_beta = np.array(
+                mano_shapes[idx] if idx < len(mano_shapes) else (mano_shapes[0] if mano_shapes else [0.0] * 10),
+                dtype=np.float32,
+            )
+            mano_joint_pos = np.array(hand_row["mano_joint_pos"], dtype=np.float32)
+            T = mano_joint_pos.shape[0]
+            mano_joints = mano_joint_pos.reshape(T, 21, 3)
+            global_orient = np.array(hand_row["mano_global_rot_aa"], dtype=np.float32)
+            transl = np.array(hand_row["mano_global_pos"], dtype=np.float32)
+            hand_pose = np.array(hand_row["mano_hand_pose"], dtype=np.float32)
+
+            model_path = _resolve_mano_model_path(mano_model_path, hand_name, project_root)
+            hand_state = {
+                "name": hand_name,
+                "mano_joints": mano_joints,
+                "global_orient": global_orient,
+                "transl": transl,
+                "mano_vertices": generate_mano_vertices(model_path, hand_name, mano_beta, hand_pose, T),
+                "mano_faces": load_mano_faces(model_path),
+                "urdf_dof": np.array(hand_row["urdf_dof"], dtype=np.float32),
+                "urdf_helper": None,
+            }
+
+            if urdf_path.exists():
+                helper = URDFHelper(str(urdf_path))
+                if helper.model is not None:
+                    hand_state["urdf_helper"] = helper
+
+            self.hands.append(hand_state)
+
+        if not self.hands:
+            raise ValueError("Lance row does not contain any hand data")
+
+        self.hand_names = [h["name"] for h in self.hands]
+        self.T = min(h["mano_joints"].shape[0] for h in self.hands)
+
+        # 兼容旧的单手字段访问：曲线模块和旧 payload 默认使用第一只手。
+        first_hand = self.hands[0]
+        self.mano_joints = first_hand["mano_joints"]
+        self.global_orient = first_hand["global_orient"]
+        self.transl = first_hand["transl"]
+        self.mano_vertices = first_hand["mano_vertices"]
+        self.mano_faces = first_hand["mano_faces"]
+        self.urdf_dof = first_hand["urdf_dof"]
+        self.urdf_helper: URDFHelper | None = first_hand["urdf_helper"]
+
+        object_names = _as_list(meta.get("object_names"))
+        for idx, object_row in enumerate(_as_list(lance_row.get("objects"))):
+            object_name = str(object_names[idx] if idx < len(object_names) else f"object_{idx}")
+            self.objects.append({
+                "name": object_name,
+                "pos": np.array(object_row["pos"], dtype=np.float32),
+                "rot_aa": np.array(object_row["rot_aa"], dtype=np.float32),
+                "mesh": _load_object_mesh(project_root, object_name),
+            })
+
+        self.primary_object_idx = next(
+            (idx for idx, obj in enumerate(self.objects) if obj["mesh"] is not None),
+            0,
+        )
         self.object_mesh: dict | None = None
-        object_name = lance_row["trajectory_metadata"]["object_names"][0]
-        # 用 assets/objects 中的目录名做前缀匹配，兼容 cuboid2H → cuboid2 等变体
-        objects_dir = project_root / "assets/objects"
-        known = sorted([d.name for d in objects_dir.iterdir() if d.is_dir()], key=len, reverse=True)
-        matched = next((n for n in known if object_name.startswith(n)), None) or object_name
-        obj_paths = [
-            objects_dir / matched / f"{matched}_aligned.stl",
-            objects_dir / f"{matched}_aligned.stl",
-        ]
-        for obj_path in obj_paths:
-            if obj_path.exists():
-                try:
-                    mesh = trimesh.load(str(obj_path))
-                    mesh.vertices = mesh.vertices * 0.001  # mm → m
-                    self.object_mesh = {
-                        "vertices": np.asarray(mesh.vertices, dtype=np.float32),
-                        "faces": np.asarray(mesh.faces, dtype=np.int32),
-                    }
-                    break
-                except Exception:
-                    pass
+        if self.objects:
+            primary_object = self.objects[self.primary_object_idx]
+            self.obj_pos = primary_object["pos"]
+            self.obj_rot_aa = primary_object["rot_aa"]
+            self.object_mesh = primary_object["mesh"]
+        else:
+            self.obj_pos = np.zeros((self.T, 3), dtype=np.float32)
+            self.obj_rot_aa = np.zeros((self.T, 3), dtype=np.float32)
 
 
 def get_frame_data(
@@ -117,83 +214,98 @@ def get_frame_data(
         "frame_idx": frame_idx,
         "total_frames": state.T,
         "scene": state.lance_row["index"]["scene"],
+        "hands": [],
         "mano_mesh": None,
         "mano_joints": None,
         "urdf_joints": None,
         "urdf_meshes": None,
         "object_mesh": None,
-        "object_pose": {
-            "pos": state.obj_pos[frame_idx].tolist(),
-            "rot_aa": state.obj_rot_aa[frame_idx].tolist(),
-        },
+        "object_poses": [],
+        "object_pose": None,
         "show_origin": show_origin,
     }
 
-    # MANO mesh
-    if show_mano_mesh:
-        vw, jw = transform_mano_to_world(
-            state.mano_vertices[frame_idx],
-            state.mano_joints[frame_idx],
-            state.global_orient[frame_idx],
-            state.transl[frame_idx],
-        )
-        result["mano_mesh"] = {
-            "x": vw[:, 0].tolist(),
-            "y": vw[:, 1].tolist(),
-            "z": vw[:, 2].tolist(),
-            "i": state.mano_faces[:, 0].tolist(),
-            "j": state.mano_faces[:, 1].tolist(),
-            "k": state.mano_faces[:, 2].tolist(),
+    for hand_state in state.hands:
+        hand_payload = {
+            "name": hand_state["name"],
+            "mano_mesh": None,
+            "mano_joints": None,
+            "urdf_joints": None,
+            "urdf_meshes": None,
         }
 
-    # MANO joints
-    if show_mano_joints:
-        _, jw = transform_mano_to_world(
-            state.mano_vertices[frame_idx],
-            state.mano_joints[frame_idx],
-            state.global_orient[frame_idx],
-            state.transl[frame_idx],
-        )
-        result["mano_joints"] = {
-            "x": jw[:, 0].tolist(),
-            "y": jw[:, 1].tolist(),
-            "z": jw[:, 2].tolist(),
-            "names": [f"Joint {i}" for i in range(21)],
-        }
+        world_joints = None
+        if show_mano_mesh or show_mano_joints:
+            vw, world_joints = transform_mano_to_world(
+                hand_state["mano_vertices"][frame_idx],
+                hand_state["mano_joints"][frame_idx],
+                hand_state["global_orient"][frame_idx],
+                hand_state["transl"][frame_idx],
+            )
+            if show_mano_mesh:
+                hand_payload["mano_mesh"] = _mesh_payload(vw, hand_state["mano_faces"])
 
-    # URDF
-    if state.urdf_helper and (show_urdf_joints or show_urdf_mesh):
-        state.urdf_helper.forward_kinematics(state.urdf_dof[frame_idx])
+        if show_mano_joints and world_joints is not None:
+            hand_payload["mano_joints"] = {
+                "x": world_joints[:, 0].tolist(),
+                "y": world_joints[:, 1].tolist(),
+                "z": world_joints[:, 2].tolist(),
+                "names": [f"{hand_state['name']} Joint {i}" for i in range(21)],
+            }
 
-        if show_urdf_joints:
-            pts = state.urdf_helper.extract_joint_positions()
-            if pts is not None:
-                result["urdf_joints"] = {
-                    "x": pts[:, 0].tolist(),
-                    "y": pts[:, 1].tolist(),
-                    "z": pts[:, 2].tolist(),
-                    "names": [f"URDF {n}" for n in state.urdf_helper.get_joint_names()],
-                }
+        urdf_helper = hand_state["urdf_helper"]
+        if urdf_helper and (show_urdf_joints or show_urdf_mesh):
+            urdf_helper.forward_kinematics(hand_state["urdf_dof"][frame_idx])
 
-        if show_urdf_mesh:
-            meshes = state.urdf_helper.get_transformed_meshes()
-            result["urdf_meshes"] = [
-                {
-                    "x": m["vertices"][:, 0].tolist(),
-                    "y": m["vertices"][:, 1].tolist(),
-                    "z": m["vertices"][:, 2].tolist(),
-                    "i": m["faces"][:, 0].tolist(),
-                    "j": m["faces"][:, 1].tolist(),
-                    "k": m["faces"][:, 2].tolist(),
-                }
-                for m in meshes
-            ]
+            if show_urdf_joints:
+                pts = urdf_helper.extract_joint_positions()
+                if pts is not None:
+                    hand_payload["urdf_joints"] = {
+                        "x": pts[:, 0].tolist(),
+                        "y": pts[:, 1].tolist(),
+                        "z": pts[:, 2].tolist(),
+                        "names": [f"{hand_state['name']} URDF {n}" for n in urdf_helper.get_joint_names()],
+                    }
+
+            if show_urdf_mesh:
+                hand_payload["urdf_meshes"] = [
+                    _mesh_payload(m["vertices"], m["faces"])
+                    for m in urdf_helper.get_transformed_meshes()
+                ]
+
+        result["hands"].append(hand_payload)
+
+    # 兼容旧前端字段：默认映射第一只手。
+    if result["hands"]:
+        first = result["hands"][0]
+        result["mano_mesh"] = first["mano_mesh"]
+        result["mano_joints"] = first["mano_joints"]
+        result["urdf_joints"] = first["urdf_joints"]
+        result["urdf_meshes"] = first["urdf_meshes"]
 
     # Object mesh
-    if show_object and state.object_mesh:
-        result["object_transform"] = {
-            "position": state.obj_pos[frame_idx].tolist(),
-            "rotation": state.obj_rot_aa[frame_idx].tolist(),
-        }
+    if show_object:
+        for obj in state.objects:
+            result["object_poses"].append({
+                "name": obj["name"],
+                "pos": obj["pos"][frame_idx].tolist(),
+                "rot_aa": obj["rot_aa"][frame_idx].tolist(),
+                "has_mesh": obj["mesh"] is not None,
+            })
+
+        if state.objects:
+            primary = state.objects[state.primary_object_idx]
+            primary_pose = {
+                "pos": primary["pos"][frame_idx].tolist(),
+                "rot_aa": primary["rot_aa"][frame_idx].tolist(),
+                "name": primary["name"],
+                "has_mesh": primary["mesh"] is not None,
+            }
+            result["object_pose"] = primary_pose
+            if primary["mesh"] is not None:
+                result["object_transform"] = {
+                    "position": primary_pose["pos"],
+                    "rotation": primary_pose["rot_aa"],
+                }
 
     return result
