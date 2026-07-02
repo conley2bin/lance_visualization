@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from .adapters import CmaFramePayload, FramePayload, LoadPayload, MeshPayload, TrajectoryInfo, TrajectoryListItem, ViewerAdapter
+from .adapters import CmaFramePayload, FramePayload, LoadPayload, ObjectMeshPayload, TrajectoryInfo, TrajectoryListItem, ViewerAdapter
 from .cma import get_cma_frame_data
 from .curves import get_curve_data, get_curve_options
 from .data_loader import OptimizedLanceLoader
@@ -95,17 +95,24 @@ class LanceViewerAdapter(ViewerAdapter):
         frame["title"] = frame.get("scene", "")
         return frame
 
-    def get_object_mesh_payload(self, state: TrajectoryState) -> MeshPayload | None:
-        if state.object_mesh is None:
+    def get_object_mesh_payload(self, state: TrajectoryState) -> list[ObjectMeshPayload] | None:
+        meshes: list[ObjectMeshPayload] = []
+        for obj in state.objects:
+            mesh = obj["mesh"]
+            if mesh is None:
+                continue
+            meshes.append({
+                "name": obj["name"],
+                "x": mesh["vertices"][:, 0].tolist(),
+                "y": mesh["vertices"][:, 1].tolist(),
+                "z": mesh["vertices"][:, 2].tolist(),
+                "i": mesh["faces"][:, 0].tolist(),
+                "j": mesh["faces"][:, 1].tolist(),
+                "k": mesh["faces"][:, 2].tolist(),
+            })
+        if not meshes:
             return None
-        return {
-            "x": state.object_mesh["vertices"][:, 0].tolist(),
-            "y": state.object_mesh["vertices"][:, 1].tolist(),
-            "z": state.object_mesh["vertices"][:, 2].tolist(),
-            "i": state.object_mesh["faces"][:, 0].tolist(),
-            "j": state.object_mesh["faces"][:, 1].tolist(),
-            "k": state.object_mesh["faces"][:, 2].tolist(),
-        }
+        return meshes
 
     def get_video_frame_payload(
         self,

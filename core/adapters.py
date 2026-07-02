@@ -33,6 +33,10 @@ class MeshPayload(TypedDict):
     k: list[int]
 
 
+class ObjectMeshPayload(MeshPayload, total=False):
+    name: str
+
+
 class PointsPayload(TypedDict):
     x: list[float]
     y: list[float]
@@ -138,7 +142,7 @@ class ViewerAdapter(Protocol):
     ) -> FramePayload:
         ...
 
-    def get_object_mesh_payload(self, state: Any) -> MeshPayload | None:
+    def get_object_mesh_payload(self, state: Any) -> ObjectMeshPayload | list[ObjectMeshPayload] | None:
         ...
 
     def get_video_frame_payload(
@@ -196,7 +200,7 @@ class EmptyViewerAdapter:
     ) -> FramePayload:
         raise RuntimeError("请先选择 Lance 数据源")
 
-    def get_object_mesh_payload(self, state: Any) -> MeshPayload | None:
+    def get_object_mesh_payload(self, state: Any) -> ObjectMeshPayload | list[ObjectMeshPayload] | None:
         raise RuntimeError("请先选择 Lance 数据源")
 
     def get_video_frame_payload(

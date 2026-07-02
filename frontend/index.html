@@ -597,10 +597,35 @@ function hideAllHandVisuals() {
   handVisuals.forEach(hideHandVisual);
 }
 
-const OBJ = {
-  objectMesh: makeMeshObj(0xFFD700, 0.88),
-};
-let objectMeshData = null; // 存储物体网格数据（只加载一次）
+const objectVisuals = [];
+let objectMeshData = []; // 存储物体网格数据（只加载一次）
+
+function makeObjectVisual() {
+  return { mesh: makeMeshObj(0xFFD700, 0.88) };
+}
+
+function hideObjectVisual(visual) {
+  visual.mesh.visible = false;
+}
+
+function ensureObjectVisuals(count) {
+  while (objectVisuals.length < count) {
+    objectVisuals.push(makeObjectVisual());
+  }
+  for (let i = count; i < objectVisuals.length; i++) hideObjectVisual(objectVisuals[i]);
+}
+
+function hideAllObjectVisuals() {
+  objectVisuals.forEach(hideObjectVisual);
+}
+
+function normalizeObjectMeshPayload(payload) {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload.filter(Boolean);
+  if (Array.isArray(payload.objects)) return payload.objects.filter(Boolean);
+  return [payload];
+}
+
 let objectAxesLength = 0.12;
 const OBJECT_AXIS_DIRECTIONS = {
   x: new THREE.Vector3(1, 0, 0),   // lance X -> Three X
@@ -1057,7 +1082,8 @@ function applyCma(d) {
     fitPoints.push(...setCmaLineSegments(CMA_OBJ.humanLines, d.human_lines));
   }
   fitPoints.push(...setCmaPoints(CMA_OBJ.bodyMarkers, d.body_markers));
-  const objectPose = d.object_pose || (
+  const objectPoses = Array.isArray(d.object_poses) ? d.object_poses : [];
+  const objectPose = objectPoses[0] || d.object_pose || (
     d.object_transform
       ? { pos: d.object_transform.position, rot_aa: d.object_transform.rotation }
       : null
@@ -1179,11 +1205,22 @@ function apply3D(d) {
   setObjectPoseAxes(objectPose);
 
   // 物体网格：使用变换而不是每帧传输完整数据
-  if (objectPose && d.object_transform && objectMeshData) {
-    applyObjectPose(OBJ.objectMesh, objectPose);
-    OBJ.objectMesh.visible = true;
+  const poseByName = new Map(objectPoses.map(pose => [pose.name, pose]));
+  if ($('cb-object').checked && objectMeshData.length) {
+    ensureObjectVisuals(objectMeshData.length);
+    objectMeshData.forEach((meshData, meshIdx) => {
+      const visual = objectVisuals[meshIdx];
+      const pose = poseByName.get(meshData.name) || objectPoses[meshIdx] || objectPose;
+      if (pose) {
+        applyObjectPose(visual.mesh, pose);
+        visual.mesh.visible = true;
+      } else {
+        visual.mesh.visible = false;
+      }
+    });
+    for (let i = objectMeshData.length; i < objectVisuals.length; i++) hideObjectVisual(objectVisuals[i]);
   } else {
-    OBJ.objectMesh.visible = false;
+    hideAllObjectVisuals();
   }
   gridHelper.visible = $('cb-grid').checked;
 }
@@ -1384,7 +1421,7 @@ function clearTrajectoryVisuals() {
   S.curveData = {};
   S.currentTrajectoryInfoBase = '';
   S.currentIndexData = null;
-  objectMeshData = null;
+  objectMeshData = [];
   $('traj-search').value = '';
   $('traj-info').textContent = '';
   $('frame-slider').max = 0;
@@ -1397,7 +1434,7 @@ function clearTrajectoryVisuals() {
   setCmaUnavailable();
   $('object-pose-overlay').classList.add('hidden');
   hideAllHandVisuals();
-  Object.values(OBJ).forEach(obj => { obj.visible = false; });
+  hideAllObjectVisuals();
   objectPoseAxes.visible = false;
   objectAxisLabels.forEach(item => { item.el.style.display = 'none'; });
   renderIndexDetails();
@@ -1661,15 +1698,25 @@ async function loadTrajectory(index) {
 
     // 加载物体网格（只加载一次）
     if (info.has_object_mesh) {
-      objectMeshData = await apiFetch(withSession(`./api/object_mesh/${index}`));
-      if (objectMeshData) {
-        setMesh(OBJ.objectMesh, objectMeshData);
-        OBJ.objectMesh.geometry.computeBoundingSphere();
-        setObjectAxesLength((OBJ.objectMesh.geometry.boundingSphere?.radius || 0.12) * 0.55);
+      objectMeshData = normalizeObjectMeshPayload(await apiFetch(withSession(`./api/object_mesh/${index}`)));
+      ensureObjectVisuals(objectMeshData.length);
+      if (objectMeshData.length) {
+        objectMeshData.forEach((meshData, meshIdx) => {
+          const visual = objectVisuals[meshIdx];
+          setMesh(visual.mesh, meshData);
+          visual.mesh.geometry.computeBoundingSphere();
+          visual.mesh.visible = false;
+        });
+        for (let i = objectMeshData.length; i < objectVisuals.length; i++) hideObjectVisual(objectVisuals[i]);
+        const firstMesh = objectVisuals[0].mesh;
+        setObjectAxesLength((firstMesh.geometry.boundingSphere?.radius || 0.12) * 0.55);
+      } else {
+        hideAllObjectVisuals();
+        setObjectAxesLength(0.12);
       }
     } else {
-      objectMeshData = null;
-      OBJ.objectMesh.visible = false;
+      objectMeshData = [];
+      hideAllObjectVisuals();
       setObjectAxesLength(0.12);
     }
 
