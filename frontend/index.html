@@ -844,6 +844,37 @@ const CMA_OBJ = {
   bodyMarkers: makeCmaPointsObj(0xfbbf24, 0.012),
 };
 
+const CMA_HAND_PALETTES = [
+  { markers: 0x7dd3fc, lines: 0xbae6fd },
+  { markers: 0xfb923c, lines: 0xfdba74 },
+  { markers: 0x86efac, lines: 0xbbf7d0 },
+];
+const cmaHandVisuals = [];
+
+function makeCmaHandVisual(index) {
+  const palette = CMA_HAND_PALETTES[index % CMA_HAND_PALETTES.length];
+  return {
+    markers: makeCmaPointsObj(palette.markers, 0.012),
+    lines: makeCmaLineObj(palette.lines, 0.86),
+  };
+}
+
+function hideCmaHandVisual(visual) {
+  visual.markers.visible = false;
+  visual.lines.visible = false;
+}
+
+function ensureCmaHandVisuals(count) {
+  while (cmaHandVisuals.length < count) {
+    cmaHandVisuals.push(makeCmaHandVisual(cmaHandVisuals.length));
+  }
+  for (let i = count; i < cmaHandVisuals.length; i++) hideCmaHandVisual(cmaHandVisuals[i]);
+}
+
+function hideAllCmaHandVisuals() {
+  cmaHandVisuals.forEach(hideCmaHandVisual);
+}
+
 const cmaBounds = new THREE.Box3();
 const cmaTmp = new THREE.Vector3();
 const cmaNdc = new THREE.Vector3();
@@ -977,6 +1008,7 @@ function updateCmaAxisLabels() {
 function setCmaUnavailable() {
   $('cma-none').style.display = 'flex';
   Object.values(CMA_OBJ).forEach(obj => { obj.visible = false; });
+  hideAllCmaHandVisuals();
   cmaPoseAxes.visible = false;
   cmaAxisLabels.forEach(item => { item.el.style.display = 'none'; });
   $('cma-pose-overlay').classList.add('hidden');
@@ -1008,8 +1040,21 @@ function applyCma(d) {
   $('cma-none').style.display = 'none';
 
   const fitPoints = [];
-  fitPoints.push(...setCmaPoints(CMA_OBJ.humanMarkers, d.human_markers));
-  fitPoints.push(...setCmaLineSegments(CMA_OBJ.humanLines, d.human_lines));
+  const cmaHands = Array.isArray(d.human_hands) ? d.human_hands : [];
+  if (cmaHands.length) {
+    CMA_OBJ.humanMarkers.visible = false;
+    CMA_OBJ.humanLines.visible = false;
+    ensureCmaHandVisuals(cmaHands.length);
+    cmaHands.forEach((hand, i) => {
+      const visual = cmaHandVisuals[i];
+      fitPoints.push(...setCmaPoints(visual.markers, hand.markers));
+      fitPoints.push(...setCmaLineSegments(visual.lines, hand.lines));
+    });
+  } else {
+    hideAllCmaHandVisuals();
+    fitPoints.push(...setCmaPoints(CMA_OBJ.humanMarkers, d.human_markers));
+    fitPoints.push(...setCmaLineSegments(CMA_OBJ.humanLines, d.human_lines));
+  }
   fitPoints.push(...setCmaPoints(CMA_OBJ.bodyMarkers, d.body_markers));
   const objectPose = d.object_pose || (
     d.object_transform
@@ -1023,7 +1068,8 @@ function applyCma(d) {
     fitPoints.push(origin);
     setCmaAxesLength(0.12);
   }
-  const fitKey = `${d.total_frames}:${d.human_markers?.x?.length || 0}:${d.body_markers?.x?.length || 0}`;
+  const handFitKey = cmaHands.map(hand => `${hand.name}:${hand.markers?.x?.length || 0}:${hand.lines?.x?.length || 0}`).join('|');
+  const fitKey = `${d.total_frames}:${handFitKey}:${d.human_markers?.x?.length || 0}:${d.body_markers?.x?.length || 0}`;
   fitCmaCamera(fitPoints, fitKey);
 }
 

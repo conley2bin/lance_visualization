@@ -13,6 +13,7 @@ def _unavailable() -> dict[str, Any]:
         "timestamp_ms": None,
         "human_markers": None,
         "human_lines": None,
+        "human_hands": [],
         "body_markers": None,
         "object_pose": None,
         "object_transform": None,
@@ -93,6 +94,24 @@ def _display_name(raw: Any) -> str:
     return name
 
 
+def _is_camera_body(name: str) -> bool:
+    return name.upper().startswith("CAMERA")
+
+
+def _is_human_body(name: str) -> bool:
+    lowered = name.lower()
+    return lowered.startswith((
+        "lefthand",
+        "righthand",
+        "leftwrist",
+        "rightwrist",
+        "leftarm",
+        "rightarm",
+        "leftforearm",
+        "rightforearm",
+    ))
+
+
 def _valid_point(point: list[float] | None) -> bool:
     return bool(point and all(math.isfinite(v) for v in point) and math.hypot(*point) > 1e-9)
 
@@ -114,36 +133,104 @@ def _points_payload(names: list[str], positions: list[list[float] | None]) -> di
     return {"x": xs, "y": ys, "z": zs, "names": kept_names}
 
 
-def _make_human_line_pairs(names: list[str]) -> list[tuple[int, int]]:
-    by_name = {name: i for i, name in enumerate(names)}
-    pairs: list[tuple[int, int]] = []
-    for side in ("LeftHand", "RightHand"):
-        root = side
-        for finger in ("Thumb", "Index", "Middle", "Ring", "Pinky"):
-            chain = [f"{side}{finger}{i}" for i in range(1, 5)]
-            if root in by_name and chain[0] in by_name:
-                pairs.append((by_name[root], by_name[chain[0]]))
-            for a, b in zip(chain, chain[1:]):
-                if a in by_name and b in by_name:
-                    pairs.append((by_name[a], by_name[b]))
-    return pairs
+def _valid_index_by_name(
+    names: list[str],
+    positions: list[list[float] | None],
+) -> dict[str, int]:
+    by_name: dict[str, int] = {}
+    for i, (name, point) in enumerate(zip(names, positions)):
+        if name in by_name or not _valid_point(point):
+            continue
+        by_name[name] = i
+    return by_name
 
 
 def _human_lines_payload(names: list[str], positions: list[list[float] | None]) -> dict[str, list[float]] | None:
     xs: list[float] = []
     ys: list[float] = []
     zs: list[float] = []
-    for start, end in _make_human_line_pairs(names):
-        a = positions[start] if start < len(positions) else None
-        b = positions[end] if end < len(positions) else None
-        if not _valid_point(a) or not _valid_point(b):
-            continue
-        xs.extend([float(a[0]), float(b[0])])
-        ys.extend([float(a[1]), float(b[1])])
-        zs.extend([float(a[2]), float(b[2])])
+    by_name = _valid_index_by_name(names, positions)
+    for side in ("LeftHand", "RightHand"):
+        root = side
+        for finger in ("Thumb", "Index", "Middle", "Ring", "Pinky"):
+            chain = [f"{side}{finger}{i}" for i in range(1, 5)]
+            segments = [(root, chain[0]), *zip(chain, chain[1:])]
+            for start_name, end_name in segments:
+                start = by_name.get(start_name)
+                end = by_name.get(end_name)
+                if start is None or end is None:
+                    continue
+                a = positions[start] if start < len(positions) else None
+                b = positions[end] if end < len(positions) else None
+                if not _valid_point(a) or not _valid_point(b):
+                    continue
+                xs.extend([float(a[0]), float(b[0])])
+                ys.extend([float(a[1]), float(b[1])])
+                zs.extend([float(a[2]), float(b[2])])
     if not xs:
         return None
     return {"x": xs, "y": ys, "z": zs}
+
+
+def _side_points_payload(
+    side: str,
+    names: list[str],
+    positions: list[list[float] | None],
+) -> dict[str, list] | None:
+    side_names: list[str] = []
+    side_positions: list[list[float] | None] = []
+    seen: set[str] = set()
+    for name, point in zip(names, positions):
+        if not name.startswith(side) or name in seen or not _valid_point(point):
+            continue
+        seen.add(name)
+        side_names.append(name)
+        side_positions.append(point)
+    return _points_payload(side_names, side_positions)
+
+
+def _side_lines_payload(
+    side: str,
+    names: list[str],
+    positions: list[list[float] | None],
+) -> dict[str, list[float]] | None:
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    by_name = _valid_index_by_name(names, positions)
+    root = side
+    for finger in ("Thumb", "Index", "Middle", "Ring", "Pinky"):
+        chain = [f"{side}{finger}{i}" for i in range(1, 5)]
+        segments = [(root, chain[0]), *zip(chain, chain[1:])]
+        for start_name, end_name in segments:
+            start = by_name.get(start_name)
+            end = by_name.get(end_name)
+            if start is None or end is None:
+                continue
+            a = positions[start] if start < len(positions) else None
+            b = positions[end] if end < len(positions) else None
+            if not _valid_point(a) or not _valid_point(b):
+                continue
+            xs.extend([float(a[0]), float(b[0])])
+            ys.extend([float(a[1]), float(b[1])])
+            zs.extend([float(a[2]), float(b[2])])
+    if not xs:
+        return None
+    return {"x": xs, "y": ys, "z": zs}
+
+
+def _human_hands_payload(names: list[str], positions: list[list[float] | None]) -> list[dict[str, Any]]:
+    hands: list[dict[str, Any]] = []
+    for side in ("LeftHand", "RightHand"):
+        markers = _side_points_payload(side, names, positions)
+        lines = _side_lines_payload(side, names, positions)
+        if markers or lines:
+            hands.append({
+                "name": "left" if side == "LeftHand" else "right",
+                "markers": markers,
+                "lines": lines,
+            })
+    return hands
 
 
 def _quat_to_rotvec(quat: list[float] | None) -> list[float] | None:
@@ -168,6 +255,7 @@ def get_cma_frame_data(lance_row: dict[str, Any], frame_idx: int) -> dict[str, A
     cma_data = lance_row.get("cma_data")
     if not isinstance(cma_data, dict):
         return _unavailable()
+    meta = lance_row.get("trajectory_metadata") or {}
 
     human_frames = _as_sequence(cma_data.get("human_marker_frames"))
     body_frames = _as_sequence(cma_data.get("body_frames"))
@@ -208,19 +296,29 @@ def get_cma_frame_data(lance_row: dict[str, Any], frame_idx: int) -> dict[str, A
 
     human_markers = _points_payload(marker_names, marker_positions)
     human_lines = _human_lines_payload(marker_names, marker_positions)
+    human_hands = _human_hands_payload(marker_names, marker_positions)
     body_markers = _points_payload(body_names, body_positions)
     object_pose = None
-    for body in bodies:
-        if body["name"].upper().startswith("CAMERA"):
+    object_names = {str(name) for name in _as_sequence(meta.get("object_names"))}
+    ordered_bodies = sorted(
+        bodies,
+        key=lambda body: 0 if body["name"] in object_names else 1,
+    )
+    for body in ordered_bodies:
+        if _is_camera_body(body["name"]) or _is_human_body(body["name"]):
             continue
         rot_aa = _quat_to_rotvec(body["quaternion"])
         if rot_aa is not None:
-            object_pose = {"pos": body["position"], "rot_aa": rot_aa}
+            object_pose = {"pos": body["position"], "rot_aa": rot_aa, "name": body["name"]}
             break
-    if object_pose is None and bodies:
-        rot_aa = _quat_to_rotvec(bodies[0]["quaternion"])
+    if object_pose is None and ordered_bodies:
+        rot_aa = _quat_to_rotvec(ordered_bodies[0]["quaternion"])
         if rot_aa is not None:
-            object_pose = {"pos": bodies[0]["position"], "rot_aa": rot_aa}
+            object_pose = {
+                "pos": ordered_bodies[0]["position"],
+                "rot_aa": rot_aa,
+                "name": ordered_bodies[0]["name"],
+            }
 
     if not human_markers and not body_markers and object_pose is None:
         result = _unavailable()
@@ -236,6 +334,7 @@ def get_cma_frame_data(lance_row: dict[str, Any], frame_idx: int) -> dict[str, A
         "timestamp_ms": _scalar_at(cma_data.get("timestamp_ms"), frame_idx),
         "human_markers": human_markers,
         "human_lines": human_lines,
+        "human_hands": human_hands,
         "body_markers": body_markers,
         "object_pose": object_pose,
         "object_transform": {

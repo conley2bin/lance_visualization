@@ -74,6 +74,11 @@ class CmaFramePayload(TypedDict, total=False):
     frame_counter: int | float | None
     timestamp_ms: int | float | None
     human_markers: PointsPayload | None
+    human_lines: PointsPayload | None
+    human_hands: list[dict[str, Any]]
+    body_markers: PointsPayload | None
+    object_pose: ObjectPosePayload | None
+    object_transform: ObjectTransformPayload | None
     bodies: list[dict[str, Any]]
 
 
