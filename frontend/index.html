@@ -559,14 +559,15 @@ function makePointsObj(color, size = 0.006) {
   return o;
 }
 
-const HAND_PALETTES = [
-  { mano: 0x6ec6f5, joints: 0x6ec6f5, urdfJoints: 0xfbbf24, urdfMesh: 0xf5deb3 },
-  { mano: 0xff8f70, joints: 0xffb199, urdfJoints: 0xa78bfa, urdfMesh: 0xfca5a5 },
-  { mano: 0x74d99f, joints: 0x9be7ba, urdfJoints: 0x60a5fa, urdfMesh: 0xbbf7d0 },
-];
+const HAND_PALETTE = {
+  mano: 0x6ec6f5,
+  joints: 0x6ec6f5,
+  urdfJoints: 0xfbbf24,
+  urdfMesh: 0xfbbf24,
+};
 
 function makeHandVisual(index) {
-  const palette = HAND_PALETTES[index % HAND_PALETTES.length];
+  const palette = HAND_PALETTE;
   return {
     palette,
     manoMesh: makeMeshObj(palette.mano, 0.78),
