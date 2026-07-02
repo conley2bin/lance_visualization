@@ -1176,7 +1176,8 @@ function apply3D(d) {
         urdf_joints: d.urdf_joints,
         urdf_meshes: d.urdf_meshes || [],
       }];
-  const objectPose = d.object_pose || (
+  const objectPoses = Array.isArray(d.object_poses) ? d.object_poses : [];
+  const objectPose = objectPoses[0] || d.object_pose || (
     d.object_transform
       ? { pos: d.object_transform.position, rot_aa: d.object_transform.rotation }
       : null
@@ -1268,8 +1269,17 @@ async function refreshFrame() {
     // 如果有更新的请求已经发出，丢弃本次结果
     if (seq !== _frameSeq) return;
 
-    apply3D(d3);
-    applyCma(dcma);
+    try {
+      apply3D(d3);
+    } catch (e) {
+      console.warn('3D view update failed', e);
+    }
+    try {
+      applyCma(dcma);
+    } catch (e) {
+      console.warn('CMA view update failed', e);
+      setCmaUnavailable();
+    }
     if (dv) {
       $('video-img').src = dv.data_uri;
       $('video-img').style.display = 'block';
@@ -1280,7 +1290,7 @@ async function refreshFrame() {
     }
   } catch (e) {
     if (e.name === 'AbortError') return;  // 正常取消，忽略
-    setCmaUnavailable();
+    console.warn('frame refresh failed', e);
   }
   drawCurve();
 }
