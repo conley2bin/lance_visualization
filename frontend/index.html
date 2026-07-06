@@ -1252,7 +1252,8 @@ async function refreshFrame() {
           show_object:      $('cb-object').checked,
           show_origin:      false,
         });
-        return fetchWithSig(withSession(`./api/frame/${S.trajIndex}/${S.frameIdx}?${p}`));
+        return fetchWithSig(withSession(`./api/frame/${S.trajIndex}/${S.frameIdx}?${p}`))
+          .catch(() => null);
       })(),
       (async () => {
         if (S.trajIndex === null || S.numCameras === 0) return null;
@@ -1270,7 +1271,7 @@ async function refreshFrame() {
     if (seq !== _frameSeq) return;
 
     try {
-      apply3D(d3);
+      if (d3) apply3D(d3);
     } catch (e) {
       console.warn('3D view update failed', e);
     }
@@ -1708,19 +1709,26 @@ async function loadTrajectory(index) {
 
     // 加载物体网格（只加载一次）
     if (info.has_object_mesh) {
-      objectMeshData = normalizeObjectMeshPayload(await apiFetch(withSession(`./api/object_mesh/${index}`)));
-      ensureObjectVisuals(objectMeshData.length);
-      if (objectMeshData.length) {
-        objectMeshData.forEach((meshData, meshIdx) => {
-          const visual = objectVisuals[meshIdx];
-          setMesh(visual.mesh, meshData);
-          visual.mesh.geometry.computeBoundingSphere();
-          visual.mesh.visible = false;
-        });
-        for (let i = objectMeshData.length; i < objectVisuals.length; i++) hideObjectVisual(objectVisuals[i]);
-        const firstMesh = objectVisuals[0].mesh;
-        setObjectAxesLength((firstMesh.geometry.boundingSphere?.radius || 0.12) * 0.55);
-      } else {
+      try {
+        objectMeshData = normalizeObjectMeshPayload(await apiFetch(withSession(`./api/object_mesh/${index}`)));
+        ensureObjectVisuals(objectMeshData.length);
+        if (objectMeshData.length) {
+          objectMeshData.forEach((meshData, meshIdx) => {
+            const visual = objectVisuals[meshIdx];
+            setMesh(visual.mesh, meshData);
+            visual.mesh.geometry.computeBoundingSphere();
+            visual.mesh.visible = false;
+          });
+          for (let i = objectMeshData.length; i < objectVisuals.length; i++) hideObjectVisual(objectVisuals[i]);
+          const firstMesh = objectVisuals[0].mesh;
+          setObjectAxesLength((firstMesh.geometry.boundingSphere?.radius || 0.12) * 0.55);
+        } else {
+          hideAllObjectVisuals();
+          setObjectAxesLength(0.12);
+        }
+      } catch (e) {
+        console.warn('object mesh load failed', e);
+        objectMeshData = [];
         hideAllObjectVisuals();
         setObjectAxesLength(0.12);
       }

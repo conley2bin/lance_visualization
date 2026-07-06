@@ -95,7 +95,7 @@ class LanceViewerAdapter(ViewerAdapter):
         frame["title"] = frame.get("scene", "")
         return frame
 
-    def get_object_mesh_payload(self, state: TrajectoryState) -> list[ObjectMeshPayload] | None:
+    def get_object_mesh_payload(self, state: TrajectoryState) -> ObjectMeshPayload | None:
         meshes: list[ObjectMeshPayload] = []
         for obj in state.objects:
             mesh = obj["mesh"]
@@ -112,7 +112,10 @@ class LanceViewerAdapter(ViewerAdapter):
             })
         if not meshes:
             return None
-        return meshes
+        return {
+            **meshes[0],
+            "objects": meshes,
+        }
 
     def get_video_frame_payload(
         self,
