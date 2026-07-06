@@ -275,6 +275,7 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
     </div>
     <button class="top-btn" id="btn-source-browse">浏览</button>
     <button class="top-btn" id="btn-source-load">加载</button>
+    <button class="top-btn" id="btn-share-link">复制链接</button>
   </div>
 </div>
 
@@ -423,6 +424,7 @@ const S = {
   showTrajectoryIndex: false,
   currentTrajectoryInfoBase: '',
   currentIndexData: null,
+  currentTrajectoryUuid: '',
   searchMode: 'name',
 };
 
@@ -454,6 +456,66 @@ function withSession(url) {
   if (!S.datasetSessionId) return url;
   const sep = url.includes('?') ? '&' : '?';
   return `${url}${sep}session_id=${encodeURIComponent(S.datasetSessionId)}`;
+}
+
+function parseInitialLinkState() {
+  const params = new URLSearchParams(window.location.search);
+  const intValue = value => {
+    const parsed = Number.parseInt(value || '', 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  return {
+    lancePath: params.get('lance') || params.get('lance_path') || params.get('dataset') || '',
+    trajUuid: params.get('traj_uuid') || params.get('uuid') || '',
+    trajIndex: intValue(params.get('traj') || params.get('trajectory') || params.get('index')),
+    frame: intValue(params.get('frame')),
+  };
+}
+
+function findTrajectoryByLinkState(linkState = {}) {
+  if (!_allTrajs.length) return null;
+  const targetUuid = String(linkState.trajUuid || '').trim().toLowerCase();
+  if (targetUuid) {
+    const target = _allTrajs.find(traj => {
+      const uuid = String(traj.uuid || '').toLowerCase();
+      return uuid && (uuid === targetUuid || uuid.startsWith(targetUuid) || targetUuid.startsWith(uuid));
+    });
+    if (target) return target;
+  }
+  if (Number.isInteger(linkState.trajIndex)) {
+    const target = _allTrajs.find(traj => traj.index === linkState.trajIndex);
+    if (target) return target;
+  }
+  return _allTrajs[0];
+}
+
+function buildShareUrl() {
+  const url = new URL(window.location.href);
+  url.search = '';
+  url.hash = '';
+  if (S.lancePath) url.searchParams.set('lance', S.lancePath);
+  if (S.trajIndex !== null) {
+    if (S.currentTrajectoryUuid) url.searchParams.set('traj_uuid', S.currentTrajectoryUuid);
+    url.searchParams.set('traj', String(S.trajIndex));
+  }
+  if (S.frameIdx > 0) url.searchParams.set('frame', String(S.frameIdx));
+  return url.toString();
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const el = document.createElement('textarea');
+  el.value = text;
+  el.setAttribute('readonly', '');
+  el.style.position = 'fixed';
+  el.style.left = '-9999px';
+  document.body.appendChild(el);
+  el.select();
+  document.execCommand('copy');
+  document.body.removeChild(el);
 }
 
 // 竞态保护：每次 refreshFrame 生成唯一序号，过时响应直接丢弃
@@ -1432,6 +1494,7 @@ function clearTrajectoryVisuals() {
   S.curveData = {};
   S.currentTrajectoryInfoBase = '';
   S.currentIndexData = null;
+  S.currentTrajectoryUuid = '';
   objectMeshData = [];
   $('traj-search').value = '';
   $('traj-info').textContent = '';
@@ -1523,7 +1586,7 @@ function clearSourceSelection() {
   $('source-path').dataset.selectedName = '';
 }
 
-async function loadDatasetFromPath(path) {
+async function loadDatasetFromPath(path, options = {}) {
   const lancePath = path.trim();
   if (!lancePath) {
     clearSourceSelection();
@@ -1546,7 +1609,8 @@ async function loadDatasetFromPath(path) {
     $('source-path').dataset.selectedName = currentRecord?.dataset_name || currentRecord?.dataset_path || '';
     setTrajectoryList(result.trajectories || []);
     if (_allTrajs.length) {
-      await loadTrajectory(_allTrajs[0].index);
+      const target = findTrajectoryByLinkState(options);
+      await loadTrajectory(target.index, { frame: options.frame });
     } else {
       clearTrajectoryVisuals();
       hideLoading();
@@ -1695,17 +1759,23 @@ async function browseDataSource(path) {
 // ════════════════════════════════════════════════════════
 // 加载轨迹
 // ════════════════════════════════════════════════════════
-async function loadTrajectory(index) {
+async function loadTrajectory(index, options = {}) {
   stopPlay();
   showLoading(`加载轨迹 ${index}…`);
   try {
     const info = await apiFetch(withSession(`./api/trajectory/${index}/load`));
     S.trajIndex = index;
     S.totalFrames = info.total_frames;
-    S.frameIdx = 0;
+    const requestedFrame = Number.parseInt(options.frame ?? '0', 10);
+    S.frameIdx = Number.isFinite(requestedFrame)
+      ? Math.max(0, Math.min(info.total_frames - 1, requestedFrame))
+      : 0;
     S.numCameras = info.num_cameras;
     S.curveData = {};
     S.currentIndexData = info.index_data || null;
+    S.currentTrajectoryUuid = info.index_data?.uuid || info.uuid || '';
+    const currentTraj = _allTrajs.find(traj => traj.index === index);
+    $('traj-search').value = currentTraj?.label || info.label || '';
 
     // 加载物体网格（只加载一次）
     if (info.has_object_mesh) {
@@ -1742,7 +1812,7 @@ async function loadTrajectory(index) {
     renderTrajectoryInfo();
     renderIndexDetails();
     $('frame-slider').max = info.total_frames - 1;
-    $('frame-slider').value = 0;
+    $('frame-slider').value = S.frameIdx;
 
     // 摄像头
     $('cam-select').innerHTML = '';
@@ -1773,6 +1843,8 @@ async function loadTrajectory(index) {
     }
 
     await refreshFrame();
+    const shareUrl = buildShareUrl();
+    window.history.replaceState({}, '', shareUrl);
   } finally {
     hideLoading();
   }
@@ -1947,6 +2019,22 @@ document.addEventListener('click', e => {
 });
 
 $('btn-source-load').onclick = () => loadDatasetFromPath(resolveSourceInputPath());
+$('btn-share-link').onclick = async () => {
+  if (!S.lancePath) {
+    alert('请先选择 Lance 数据源');
+    return;
+  }
+  const url = buildShareUrl();
+  try {
+    await copyTextToClipboard(url);
+    const btn = $('btn-share-link');
+    const oldText = btn.textContent;
+    btn.textContent = '已复制';
+    setTimeout(() => { btn.textContent = oldText; }, 1200);
+  } catch (e) {
+    alert(`复制失败: ${e.message}`);
+  }
+};
 $('source-path').addEventListener('keydown', e => {
   if (e.key === 'Enter') loadDatasetFromPath(resolveSourceInputPath());
 });
@@ -2032,6 +2120,13 @@ $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ �
 (async () => {
   try {
     showLoading('初始化…');
+    const linkState = parseInitialLinkState();
+    if (linkState.lancePath) {
+      setDatasetSessionId('');
+      await fetchRecentDatasets();
+      await loadDatasetFromPath(linkState.lancePath, linkState);
+      return;
+    }
     try {
       const current = await apiFetch(withSession('./api/dataset/current'));
       setDatasetSessionId(current.session_id || S.datasetSessionId);
