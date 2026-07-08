@@ -8,6 +8,7 @@ from collections import OrderedDict
 
 import copy
 import os
+import subprocess
 import time
 import uuid
 
@@ -56,13 +57,15 @@ _DEFAULT_SESSION_ID = "default"
 _MAX_SESSION_COUNT = int(os.environ.get("DATASET_SESSION_LIMIT", "16"))
 _SESSION_TTL_SECONDS = int(os.environ.get("DATASET_SESSION_TTL_SECONDS", "1800"))
 _sessions: OrderedDict[str, dict] = OrderedDict()
+_assets_version: str | None = None
 
 
 @app.on_event("startup")
 def startup():
-    global _config, _project_root
+    global _config, _project_root, _assets_version
     _config = load_config()
     _project_root = get_project_root(_config)
+    _assets_version = _read_assets_version()
     session = _create_session(_build_empty_dataset_config(_config), session_id=_DEFAULT_SESSION_ID)
     adapter = session["adapter"]
     print(f"[startup] viewer adapter: {_config.get('viewer', {}).get('type', 'lance')}")
@@ -123,6 +126,61 @@ def _cleanup_sessions() -> None:
                 break
 
 
+def _assets_path() -> Path:
+    return _project_root / "assets"
+
+
+def _read_assets_version() -> str:
+    assets = _assets_path()
+    if not assets.exists():
+        return f"missing:{assets}"
+
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(assets), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        commit = proc.stdout.strip()
+        if commit:
+            return f"git:{commit}"
+    except Exception:
+        pass
+
+    try:
+        return f"mtime:{assets.stat().st_mtime_ns}"
+    except OSError:
+        return f"unknown:{assets}"
+
+
+def _clear_state_caches() -> int:
+    cleared = 0
+    for session in _sessions.values():
+        state_cache = session.get("state_cache")
+        if state_cache:
+            cleared += len(state_cache)
+            state_cache.clear()
+    return cleared
+
+
+def _ensure_assets_version_current() -> tuple[str, bool]:
+    global _assets_version
+    current = _read_assets_version()
+    if _assets_version is None:
+        _assets_version = current
+        return current, False
+    if current == _assets_version:
+        return current, False
+
+    previous = _assets_version
+    _assets_version = current
+    cleared = _clear_state_caches()
+    print(f"[assets] version changed: {previous} -> {current}; cleared {cleared} cached trajectory states")
+    return current, True
+
+
 def _get_session(session_id: str | None = None) -> dict:
     sid = session_id or _DEFAULT_SESSION_ID
     if sid not in _sessions:
@@ -138,6 +196,7 @@ def _get_session(session_id: str | None = None) -> dict:
 
 def _get_state(index: int, session_id: str | None = None):
     """获取（或构建）指定轨迹状态，带LRU缓存。"""
+    _ensure_assets_version_current()
     session = _get_session(session_id)
     adapter: ViewerAdapter = session["adapter"]
     state_cache: OrderedDict[int, object] = session["state_cache"]
@@ -278,6 +337,16 @@ class RecentDatasetItem(BaseModel):
 
 class RecentDatasetsResponse(BaseModel):
     items: list[RecentDatasetItem]
+
+
+@app.get("/api/assets/version")
+def get_assets_version():
+    """返回当前 assets 版本；如检测到变化，会清理轨迹状态缓存。"""
+    version, changed = _ensure_assets_version_current()
+    return {
+        "version": version,
+        "changed": changed,
+    }
 
 
 @app.get("/api/dataset/current")
@@ -440,6 +509,7 @@ def load_trajectory(index: int, session_id: str | None = None):
     print(f"[API] /api/trajectory/{index}/load 开始 session={session['id']}")
     state = _get_state(index, session_id=session["id"])
     result = session["adapter"].get_load_payload(index, state)
+    result["assets_version"] = _assets_version
     print(f"[API] /api/trajectory/{index}/load 完成 session={session['id']}，返回数据大小: {len(str(result))} 字节")
     return result
 

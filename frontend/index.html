@@ -426,6 +426,8 @@ const S = {
   currentIndexData: null,
   currentTrajectoryUuid: '',
   searchMode: 'name',
+  assetsVersion: '',
+  assetsReloading: false,
 };
 
 // ════════════════════════════════════════════════════════
@@ -523,11 +525,48 @@ let _frameSeq = 0;
 let _frameAbort = null;
 let _browserState = { path: '', parent: null, roots: [] };
 let _recentLanceRecords = [];
+let _assetsVersionPollTimer = null;
 function showLoading(msg) { $('loading-msg').textContent = msg; $('loading').classList.remove('hidden'); }
 function hideLoading() { $('loading').classList.add('hidden'); }
 function stopPlay() {
   if (S.playTimer) { clearInterval(S.playTimer); S.playTimer = null; }
   S._playing = false;
+}
+
+async function checkAssetsVersion({ reload = true } = {}) {
+  try {
+    const payload = await apiFetch('./api/assets/version');
+    const version = payload.version || '';
+    if (!version) return;
+
+    if (!S.assetsVersion) {
+      S.assetsVersion = version;
+      return;
+    }
+    if (version === S.assetsVersion) return;
+
+    S.assetsVersion = version;
+    if (!reload || S.trajIndex === null || S.assetsReloading) return;
+
+    const frame = S.frameIdx;
+    S.assetsReloading = true;
+    stopPlay();
+    showLoading('assets 已更新，重新加载轨迹…');
+    try {
+      await loadTrajectory(S.trajIndex, { frame });
+    } finally {
+      S.assetsReloading = false;
+    }
+  } catch (e) {
+    console.warn('assets version check failed', e);
+  }
+}
+
+function startAssetsVersionPolling() {
+  if (_assetsVersionPollTimer) return;
+  _assetsVersionPollTimer = setInterval(() => {
+    checkAssetsVersion({ reload: true });
+  }, 60000);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1764,6 +1803,7 @@ async function loadTrajectory(index, options = {}) {
   showLoading(`加载轨迹 ${index}…`);
   try {
     const info = await apiFetch(withSession(`./api/trajectory/${index}/load`));
+    if (info.assets_version) S.assetsVersion = info.assets_version;
     S.trajIndex = index;
     S.totalFrames = info.total_frames;
     const requestedFrame = Number.parseInt(options.frame ?? '0', 10);
@@ -2120,6 +2160,8 @@ $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ �
 (async () => {
   try {
     showLoading('初始化…');
+    await checkAssetsVersion({ reload: false });
+    startAssetsVersionPolling();
     const linkState = parseInitialLinkState();
     if (linkState.lancePath) {
       setDatasetSessionId('');

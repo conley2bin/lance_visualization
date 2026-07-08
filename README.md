@@ -211,6 +211,22 @@ docker compose up -d --build
 
 访问：`http://localhost:8868`
 
+### assets 自动更新
+
+服务器可在宿主机运行 assets watcher，定时拉取 `assets` 子模块远程 `dev` 分支：
+
+```bash
+./scripts/watch_assets_dev.sh
+```
+
+默认每 10 分钟检查一次。只检查一次可用：
+
+```bash
+./scripts/watch_assets_dev.sh --once
+```
+
+可视化服务会通过 `/api/assets/version` 检测 `assets` 当前 git hash；hash 变化后会清理后端轨迹状态缓存。前端每分钟轮询该接口，发现变化后自动按当前轨迹与当前帧重新加载，因此新 object mesh、MANO/URDF 资源会在不重启服务的情况下生效。
+
 ### 本地运行
 
 ```bash
