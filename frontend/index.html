@@ -566,7 +566,7 @@ function startAssetsVersionPolling() {
   if (_assetsVersionPollTimer) return;
   _assetsVersionPollTimer = setInterval(() => {
     checkAssetsVersion({ reload: true });
-  }, 60000);
+  }, 300000);
 }
 
 // ════════════════════════════════════════════════════════
