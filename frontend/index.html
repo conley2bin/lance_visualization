@@ -39,11 +39,27 @@ body {
 }
 .source-item:last-child { border-bottom: none; }
 .source-item:hover, .source-item.active { background: #f8f9fa; }
+.source-item.namespace-bound {
+  background: #fff7ed;
+  border-left: 3px solid #f59e0b;
+  padding-left: 5px;
+}
+.source-item.namespace-bound:hover, .source-item.namespace-bound.active { background: #ffedd5; }
+.source-item-main-row {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+}
 .source-item-main {
+  flex: 1; min-width: 0;
   color: #2c3e50; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .source-item-sub {
   color: #94a3b8; font-size: 10px; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.namespace-badge {
+  flex: 0 1 auto; max-width: 46%;
+  border: 1px solid #fdba74; background: #fffbeb; color: #9a3412;
+  border-radius: 4px; padding: 1px 5px; font-size: 10px; line-height: 1.4;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
@@ -1755,8 +1771,17 @@ function resolveSourceInputPath() {
 function renderSourceDropdown(keyword = '') {
   const dd = $('source-dropdown');
   const kw = keyword.trim().toLowerCase();
+  const namespaceText = item => (item.namespace_bindings || [])
+    .map(ns => ns.display_name || ns.schema_name)
+    .filter(Boolean)
+    .join(', ');
   const matched = kw
-    ? _recentLanceRecords.filter(item => (item.dataset_name || '').toLowerCase().includes(kw))
+    ? _recentLanceRecords.filter(item => [
+        item.dataset_name || '',
+        item.dataset_path || '',
+        item.source_schema || '',
+        namespaceText(item),
+      ].join(' ').toLowerCase().includes(kw))
     : _recentLanceRecords;
   dd.innerHTML = '';
   if (!matched.length) {
@@ -1765,15 +1790,27 @@ function renderSourceDropdown(keyword = '') {
     matched.forEach(item => {
       const el = document.createElement('div');
       el.className = 'source-item';
+      const nsText = namespaceText(item);
+      if (item.is_namespace_bound) el.classList.add('namespace-bound');
       const meta = [
+        nsText ? `命名空间: ${nsText}` : '',
         item.source_schema || 'unknown',
         item.created_at ? item.created_at.replace('T', ' ').slice(0, 19) : '',
       ].filter(Boolean).join(' · ');
       el.innerHTML = `
-        <div class="source-item-main"></div>
+        <div class="source-item-main-row">
+          <div class="source-item-main"></div>
+          <div class="namespace-badge" hidden></div>
+        </div>
         <div class="source-item-sub"></div>
       `;
       el.querySelector('.source-item-main').textContent = item.dataset_name || item.dataset_path;
+      const badge = el.querySelector('.namespace-badge');
+      if (nsText) {
+        badge.hidden = false;
+        badge.textContent = nsText;
+        badge.title = `命名空间: ${nsText}`;
+      }
       el.querySelector('.source-item-sub').textContent = meta;
       if (item.dataset_path === S.lancePath) el.classList.add('active');
       el.onclick = async () => {

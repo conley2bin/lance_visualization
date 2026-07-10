@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core.adapters import ViewerAdapter
 from core.config import get_project_root, load_config
@@ -328,11 +328,18 @@ class DatasetLoadPayload(BaseModel):
     session_id: str | None = None
 
 
+class RecentDatasetNamespaceBinding(BaseModel):
+    schema_name: str
+    display_name: str
+
+
 class RecentDatasetItem(BaseModel):
     dataset_path: str
     dataset_name: str
     source_schema: str | None = None
     created_at: str | None = None
+    is_namespace_bound: bool = False
+    namespace_bindings: list[RecentDatasetNamespaceBinding] = Field(default_factory=list)
 
 
 class RecentDatasetsResponse(BaseModel):
@@ -367,6 +374,22 @@ def get_recent_datasets():
         with conn.cursor() as cur:
             cur.execute(
                 """
+                SELECT
+                    TRIM(params.info->>'lance_path') AS lance_path,
+                    ns.schema_name,
+                    ns.display_name
+                FROM public.system_params params
+                JOIN public.namespace ns
+                  ON params.name = 'processing.daily_schedule.' || ns.schema_name
+                WHERE LOWER(COALESCE(params.info->>'enabled', 'false')) = 'true'
+                  AND NULLIF(TRIM(params.info->>'lance_path'), '') IS NOT NULL
+                ORDER BY ns.display_name ASC, ns.schema_name ASC
+                """
+            )
+            schedule_rows = cur.fetchall()
+
+            cur.execute(
+                """
                 SELECT dataset_path, dataset_name, source_schema, created_at
                 FROM (
                     SELECT
@@ -394,7 +417,23 @@ def get_recent_datasets():
     finally:
         conn.close()
 
+    namespace_bindings_by_path: dict[str, list[RecentDatasetNamespaceBinding]] = {}
+    for lance_path, schema_name, display_name in schedule_rows:
+        try:
+            resolved = _resolve_browser_path(lance_path, must_exist=True)
+        except HTTPException:
+            continue
+        if not _is_lance_path(resolved):
+            continue
+        namespace_bindings_by_path.setdefault(str(resolved), []).append(
+            RecentDatasetNamespaceBinding(
+                schema_name=schema_name,
+                display_name=display_name or schema_name,
+            )
+        )
+
     items: list[RecentDatasetItem] = []
+    seen_paths: set[str] = set()
     for dataset_path, dataset_name, source_schema, created_at in rows:
         try:
             resolved = _resolve_browser_path(dataset_path, must_exist=True)
@@ -402,15 +441,37 @@ def get_recent_datasets():
             continue
         if not _is_lance_path(resolved):
             continue
+        resolved_path = str(resolved)
+        bindings = namespace_bindings_by_path.get(resolved_path, [])
+        seen_paths.add(resolved_path)
         items.append(
             RecentDatasetItem(
-                dataset_path=str(resolved),
+                dataset_path=resolved_path,
                 dataset_name=dataset_name or resolved.name,
                 source_schema=source_schema,
                 created_at=created_at.isoformat() if created_at else None,
+                is_namespace_bound=bool(bindings),
+                namespace_bindings=bindings,
             )
         )
-    return RecentDatasetsResponse(items=items)
+
+    for dataset_path, bindings in namespace_bindings_by_path.items():
+        if dataset_path in seen_paths:
+            continue
+        items.append(
+            RecentDatasetItem(
+                dataset_path=dataset_path,
+                dataset_name=Path(dataset_path).name,
+                source_schema=bindings[0].schema_name if bindings else None,
+                created_at=None,
+                is_namespace_bound=True,
+                namespace_bindings=bindings,
+            )
+        )
+
+    bound_items = [item for item in items if item.is_namespace_bound]
+    unbound_items = [item for item in items if not item.is_namespace_bound]
+    return RecentDatasetsResponse(items=bound_items + unbound_items)
 
 
 @app.get("/api/dataset/browse")
