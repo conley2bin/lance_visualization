@@ -180,7 +180,25 @@ body {
 .cb-row input { accent-color: #1890ff; cursor: pointer; }
 
 select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 3px 6px; margin-top: 3px; }
-#curve-select { height: 110px; }
+.curve-tree {
+  height: 165px; margin-top: 3px; padding: 3px 2px;
+  background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px;
+  overflow: auto; font-size: 11px;
+}
+.curve-tree-empty { color: #94a3b8; padding: 6px; }
+.curve-branch { margin-left: 7px; }
+.curve-branch:first-child { margin-left: 0; }
+.curve-branch > summary {
+  cursor: pointer; padding: 2px 3px; border-radius: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.curve-branch > summary:hover { background: #eef6ff; color: #096dd9; }
+.curve-leaf {
+  display: flex; align-items: center; gap: 4px; min-width: 0;
+  padding: 2px 3px 2px 17px; line-height: 1.35;
+}
+.curve-leaf input { flex: 0 0 auto; accent-color: #1890ff; }
+.curve-leaf span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── 3D 视口 ── */
 #viewport {
@@ -345,7 +363,7 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
     </div>
     <div class="sec">
       <div class="sec-title">数据曲线</div>
-      <select class="small" id="curve-select" multiple></select>
+      <div id="curve-tree" class="curve-tree"></div>
     </div>
   </div>
 
@@ -1418,6 +1436,123 @@ async function refreshFrame() {
 // ════════════════════════════════════════════════════════
 const CURVE_COLORS = ['#60a5fa','#34d399','#f87171','#fbbf24','#a78bfa','#fb923c','#38bdf8'];
 const CURVE_PAD = { l: 42, r: 10, t: 6, b: 20 };
+const CURVE_GROUP_LABELS = {
+  mano: 'MANO',
+  global_pos: 'global_pos',
+  global_rot_aa: 'global_rot_aa',
+  joint: 'joint',
+  pos: 'pos',
+  rot_aa: 'rot_aa',
+  urdf: 'URDF',
+  dof: 'dof',
+  cma: 'CMA markers',
+};
+
+function curveLabel(part) {
+  const text = String(part || '');
+  const jointMatch = text.match(/^joint\[(\d+)\]$/);
+  if (jointMatch) return `joint ${jointMatch[1]}`;
+  const dofMatch = text.match(/^dof\[(\d+)\]$/);
+  if (dofMatch) return `dof ${dofMatch[1]}`;
+  return CURVE_GROUP_LABELS[text] || text;
+}
+
+function curvePathParts(name) {
+  const parts = String(name || '').split('.');
+  const result = [];
+  for (const part of parts) {
+    const jointMatch = part.match(/^(joint)\[(\d+)\]$/);
+    const dofMatch = part.match(/^(dof)\[(\d+)\]$/);
+    if (jointMatch) {
+      result.push(jointMatch[1], `${jointMatch[1]}[${jointMatch[2]}]`);
+    } else if (dofMatch) {
+      result.push(dofMatch[1], `${dofMatch[1]}[${dofMatch[2]}]`);
+    } else {
+      result.push(part);
+    }
+  }
+  return result;
+}
+
+function curveTreeNode() {
+  return { children: new Map(), curves: [] };
+}
+
+function buildCurveTree(options) {
+  const root = curveTreeNode();
+  options.forEach(name => {
+    const parts = curvePathParts(name);
+    let node = root;
+    parts.forEach((part, idx) => {
+      if (idx === parts.length - 1) {
+        node.curves.push({ name, label: curveLabel(part) });
+        return;
+      }
+      if (!node.children.has(part)) node.children.set(part, curveTreeNode());
+      node = node.children.get(part);
+    });
+  });
+  return root;
+}
+
+function selectedCurveNames() {
+  return Array.from(document.querySelectorAll('#curve-tree input[data-curve-name]:checked'))
+    .map(input => input.dataset.curveName);
+}
+
+function renderCurveTree(options, defaultNames = []) {
+  const tree = $('curve-tree');
+  tree.innerHTML = '';
+  const names = Array.isArray(options) ? options : [];
+  if (!names.length) {
+    tree.innerHTML = '<div class="curve-tree-empty">无曲线数据</div>';
+    return;
+  }
+
+  const defaults = new Set(defaultNames);
+  const root = buildCurveTree(names);
+  const renderNode = (node, container, depth = 0) => {
+    node.children.forEach((child, key) => {
+      const details = document.createElement('details');
+      details.className = 'curve-branch';
+      details.open = depth < 2;
+      const summary = document.createElement('summary');
+      summary.textContent = curveLabel(key);
+      summary.title = key;
+      details.appendChild(summary);
+      renderNode(child, details, depth + 1);
+      container.appendChild(details);
+    });
+    node.curves.forEach(curve => {
+      const label = document.createElement('label');
+      label.className = 'curve-leaf';
+      label.title = curve.name;
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.dataset.curveName = curve.name;
+      input.checked = defaults.has(curve.name);
+      input.addEventListener('change', drawCurve);
+      const span = document.createElement('span');
+      span.textContent = curve.label;
+      label.append(input, span);
+      container.appendChild(label);
+    });
+  };
+
+  renderNode(root, tree);
+}
+
+function clearCurveTree() {
+  $('curve-tree').innerHTML = '';
+}
+
+function defaultCurveNames(options) {
+  const names = Array.isArray(options) ? options : [];
+  const objectDefaults = names.filter(name => /^object1\.pos\.[xyz]$/.test(name));
+  if (objectDefaults.length) return objectDefaults;
+  const handDefaults = names.filter(name => /^hand_(left|right)\.mano\.global_pos\.[xyz]$/.test(name));
+  return handDefaults.slice(0, 3);
+}
 
 function frameFromCurveEvent(e) {
   const cvs = $('curve-canvas');
@@ -1437,20 +1572,25 @@ function drawCurve() {
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#0a0f1a'; ctx.fillRect(0, 0, W, H);
 
-  const selected = Array.from($('curve-select').selectedOptions).map(o => o.value);
+  const selected = selectedCurveNames();
   if (!selected.length || !S.totalFrames) return;
 
-  const datasets = selected.map(name => S.curveData[name]).filter(Boolean);
+  const datasets = selected
+    .map(name => Array.isArray(S.curveData[name]) ? S.curveData[name] : null)
+    .filter(Boolean);
   if (!datasets.length) return;
 
-  const allVals = datasets.flat();
+  const allVals = datasets.flat().filter(v => Number.isFinite(v));
+  if (!allVals.length) return;
   const minV = Math.min(...allVals), maxV = Math.max(...allVals);
   const range = maxV - minV || 1;
 
   const pad = CURVE_PAD;
-  const iW = W - pad.l - pad.r, iH = H - pad.t - pad.b;
+  const iW = Math.max(1, W - pad.l - pad.r);
+  const iH = Math.max(1, H - pad.t - pad.b);
+  const frameDenom = Math.max(S.totalFrames - 1, 1);
 
-  const f2x = f => pad.l + f / (S.totalFrames - 1) * iW;
+  const f2x = f => pad.l + f / frameDenom * iW;
   const v2y = v => pad.t + iH - (v - minV) / range * iH;
 
   // 网格
@@ -1467,9 +1607,18 @@ function drawCurve() {
   datasets.forEach((data, ci) => {
     ctx.strokeStyle = CURVE_COLORS[ci % CURVE_COLORS.length];
     ctx.lineWidth = 1.5; ctx.beginPath();
+    let started = false;
     data.forEach((v, f) => {
+      if (!Number.isFinite(v)) {
+        started = false;
+        return;
+      }
       const x = f2x(f), y = v2y(v);
-      f === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      if (started) ctx.lineTo(x, y);
+      else {
+        ctx.moveTo(x, y);
+        started = true;
+      }
     });
     ctx.stroke();
   });
@@ -1557,7 +1706,7 @@ function clearTrajectoryVisuals() {
   $('frame-slider').value = 0;
   $('frame-label').textContent = '帧 0 / 0';
   $('cam-select').innerHTML = '';
-  $('curve-select').innerHTML = '';
+  clearCurveTree();
   $('video-img').style.display = 'none';
   $('video-none').style.display = '';
   setCmaUnavailable();
@@ -1900,14 +2049,7 @@ async function loadTrajectory(index, options = {}) {
 
     // 曲线选项
     const opts = info.curve_options || [];
-    $('curve-select').innerHTML = '';
-    const defaults = ['mano.global_pos.x','mano.global_pos.y','mano.global_pos.z'];
-    opts.forEach(name => {
-      const o = document.createElement('option');
-      o.value = name; o.textContent = name;
-      if (defaults.includes(name)) o.selected = true;
-      $('curve-select').appendChild(o);
-    });
+    renderCurveTree(opts, defaultCurveNames(opts));
 
 
     // 预取曲线数据（批量获取）
@@ -2148,8 +2290,6 @@ $('btn-browser-up').onclick = () => {
 
 ['cb-mano-mesh','cb-mano-joints','cb-urdf-joints','cb-urdf-mesh','cb-object','cb-object-axes','cb-grid']
   .forEach(id => $(id).onchange = refreshFrame);
-
-$('curve-select').onchange = drawCurve;
 
 $('btn-play').onclick = () => {
   if (S._playing) return; // 防止重复点击
