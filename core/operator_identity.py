@@ -1,4 +1,4 @@
-"""Operator name/key mapping used by visualization."""
+"""Operator name/key mapping used by human visualization."""
 
 from __future__ import annotations
 

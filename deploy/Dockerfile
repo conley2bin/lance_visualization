@@ -1,7 +1,7 @@
 # ============================================
 # Lance 可视化 FastAPI 服务镜像
 # ============================================
-FROM 183.195.186.154:180/dockerhub/library/python:3.10
+FROM 192.168.10.11/dockerhub/library/python:3.10
 
 WORKDIR /app
 
