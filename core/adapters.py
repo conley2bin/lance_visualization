@@ -9,6 +9,18 @@ class TrajectoryListItem(TypedDict):
     uuid: str
 
 
+class TrajectoryListProgress(TypedDict, total=False):
+    status: str
+    loaded: int
+    total: int
+    percent: float
+    message: str
+    cached: bool
+    started_at: float | None
+    updated_at: float | None
+    finished_at: float | None
+
+
 class TrajectoryInfo(TypedDict, total=False):
     label: str
     title: str
@@ -127,6 +139,9 @@ class ViewerAdapter(Protocol):
     def list_items(self) -> list[TrajectoryListItem]:
         ...
 
+    def get_trajectory_list_progress(self) -> TrajectoryListProgress:
+        ...
+
     def get_item_info(self, index: int) -> TrajectoryInfo:
         ...
 
@@ -184,6 +199,19 @@ class EmptyViewerAdapter:
 
     def list_items(self) -> list[TrajectoryListItem]:
         return []
+
+    def get_trajectory_list_progress(self) -> TrajectoryListProgress:
+        return {
+            "status": "idle",
+            "loaded": 0,
+            "total": 0,
+            "percent": 0.0,
+            "message": "尚未选择数据源",
+            "cached": False,
+            "started_at": None,
+            "updated_at": None,
+            "finished_at": None,
+        }
 
     def get_item_info(self, index: int) -> TrajectoryInfo:
         raise RuntimeError("请先选择 Lance 数据源")

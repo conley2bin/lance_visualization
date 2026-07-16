@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from .adapters import CmaFramePayload, FramePayload, LoadPayload, ObjectMeshPayload, TrajectoryInfo, TrajectoryListItem, ViewerAdapter
+from .adapters import CmaFramePayload, FramePayload, LoadPayload, ObjectMeshPayload, TrajectoryInfo, TrajectoryListItem, TrajectoryListProgress, ViewerAdapter
 from .cma import get_cma_frame_data
 from .curves import get_curve_data, get_curve_options
 from .data_loader import OptimizedLanceLoader
@@ -28,6 +28,9 @@ class LanceViewerAdapter(ViewerAdapter):
     def list_items(self) -> list[TrajectoryListItem]:
         options = self.loader.create_trajectory_options()
         return [{"label": label, "index": idx, "uuid": uuid} for label, idx, uuid in options]
+
+    def get_trajectory_list_progress(self) -> TrajectoryListProgress:
+        return self.loader.get_trajectory_options_progress()
 
     def get_item_info(self, index: int) -> TrajectoryInfo:
         self._validate_index(index)

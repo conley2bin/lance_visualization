@@ -553,6 +553,15 @@ def list_trajectories(session_id: str | None = None):
     return options
 
 
+@app.get("/api/trajectories/progress")
+def get_trajectory_list_progress(session_id: str | None = None):
+    """返回轨迹列表构建进度，不返回半成品列表。"""
+    session = _get_session(session_id)
+    _ensure_dataset_selected(session)
+    adapter: ViewerAdapter = session["adapter"]
+    return adapter.get_trajectory_list_progress()
+
+
 @app.get("/api/trajectory/{index}")
 def get_trajectory_info(index: int, session_id: str | None = None):
     """返回指定轨迹的元数据。"""

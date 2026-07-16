@@ -67,6 +67,22 @@ body {
 #traj-search-wrap { position: relative; flex: 1; max-width: 480px; }
 #traj-search { width: 100%; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; outline: none; }
 #traj-search:focus { border-color: #1890ff; }
+#traj-search-wrap.list-loading #traj-search { padding-right: 120px; }
+#traj-list-progress {
+  position: absolute; left: 1px; right: 1px; bottom: 1px; height: 2px;
+  border-radius: 0 0 4px 4px; overflow: hidden; pointer-events: none;
+  background: #e5e7eb; opacity: 0; transition: opacity 0.15s ease;
+}
+#traj-search-wrap.list-loading #traj-list-progress { opacity: 1; }
+#traj-list-progress-fill {
+  width: 0%; height: 100%; background: #1890ff; transition: width 0.2s linear;
+}
+#traj-list-progress-text {
+  display: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  color: #64748b; font-size: 10px; line-height: 1; background: #fff; padding-left: 4px;
+  pointer-events: none; max-width: 110px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#traj-search-wrap.list-loading #traj-list-progress-text { display: block; }
 .search-mode {
   display: inline-flex; border: 1px solid #d9dee4; border-radius: 4px; overflow: hidden;
   background: #ffffff; flex: 0 0 auto;
@@ -100,6 +116,7 @@ body {
 #traj-dropdown.open { display: block; }
 .traj-item { padding: 5px 8px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .traj-item:hover, .traj-item.active { background: #f8f9fa; color: #1890ff; }
+.traj-item-muted { color: #94a3b8; cursor: default; }
 
 /* ── 数据源浏览弹窗 ── */
 #source-modal {
@@ -280,6 +297,70 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
 .spinner { width: 36px; height: 36px; border: 3px solid #d9d9d9; border-top-color: #1890ff; border-radius: 50%; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 #loading-msg { color: #7f8c8d; font-size: 13px; }
+#loading-submsg { color: #94a3b8; font-size: 11px; }
+#loading-progress {
+  width: min(320px, 72vw); height: 3px; border-radius: 999px; overflow: hidden;
+  background: #dbe2ea; opacity: 0; transition: opacity 0.15s ease;
+}
+#loading-progress.open { opacity: 1; }
+#loading-progress-fill {
+  width: 0%; height: 100%; background: #1890ff; transition: width 0.2s linear;
+}
+#toast-stack {
+  position: fixed;
+  top: 54px;
+  left: 50%;
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+.status-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: min(420px, calc(100vw - 28px));
+  color: #65a30d;
+  background: #f6ffed;
+  border: 1px solid #d9f7be;
+  border-radius: 4px;
+  padding: 8px 14px 8px 12px;
+  font-size: 13px;
+  line-height: 1.35;
+  box-shadow: 0 3px 10px rgba(82, 196, 26, 0.12);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-toast-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #52c41a;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.08);
+}
+.status-toast-text {
+  min-width: 0;
+}
+.status-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
 </style>
 </head>
 <body>
@@ -287,12 +368,17 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
 <div id="loading">
   <div class="spinner"></div>
   <div id="loading-msg">初始化…</div>
+  <div id="loading-submsg"></div>
+  <div id="loading-progress"><div id="loading-progress-fill"></div></div>
 </div>
+<div id="toast-stack" aria-live="polite" aria-atomic="true"></div>
 
 <div id="topbar">
   <h1>真人Lance数据可视化</h1>
   <div id="traj-search-wrap">
   <input id="traj-search" type="text" placeholder="搜索轨迹名…" autocomplete="off">
+  <div id="traj-list-progress"><div id="traj-list-progress-fill"></div></div>
+  <div id="traj-list-progress-text"></div>
   <div id="traj-dropdown"></div>
   </div>
   <div class="search-mode" aria-label="搜索模式">
@@ -562,11 +648,121 @@ let _frameAbort = null;
 let _datasetLoadSeq = 0;
 let _trajectoryLoadSeq = 0;
 let _trajectoryListSeq = 0;
+let _trajectoryListLoading = false;
+let _trajectoryProgressPollTimer = null;
 let _browserState = { path: '', parent: null, roots: [] };
 let _recentLanceRecords = [];
 let _assetsVersionPollTimer = null;
 function showLoading(msg) { $('loading-msg').textContent = msg; $('loading').classList.remove('hidden'); }
 function hideLoading() { $('loading').classList.add('hidden'); }
+function clearStatusToasts() {
+  const stack = $('toast-stack');
+  if (stack) stack.replaceChildren();
+}
+function showStatusToast(message, duration = 2000) {
+  const stack = $('toast-stack');
+  if (!stack) return;
+  clearStatusToasts();
+  const toast = document.createElement('div');
+  toast.className = 'status-toast';
+  const icon = document.createElement('span');
+  icon.className = 'status-toast-icon';
+  icon.textContent = '✓';
+  const text = document.createElement('span');
+  text.className = 'status-toast-text';
+  text.textContent = message;
+  toast.append(icon, text);
+  stack.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('visible'));
+  const dismiss = () => {
+    toast.classList.remove('visible');
+    setTimeout(() => toast.remove(), 180);
+  };
+  const timer = setTimeout(dismiss, duration);
+  toast.addEventListener('pointerdown', () => {
+    clearTimeout(timer);
+    dismiss();
+  }, { once: true });
+}
+function stopTrajectoryListProgressPolling() {
+  if (_trajectoryProgressPollTimer) {
+    clearTimeout(_trajectoryProgressPollTimer);
+    _trajectoryProgressPollTimer = null;
+  }
+}
+
+function updateTrajectoryListProgress(progress = {}) {
+  const total = Number(progress.total ?? 0);
+  const loaded = Number(progress.loaded ?? 0);
+  const rawPercent = Number(progress.percent);
+  const percent = Number.isFinite(rawPercent)
+    ? rawPercent
+    : (total > 0 ? loaded / total * 100 : 0);
+  const clamped = Math.max(0, Math.min(100, percent));
+  const status = progress.status || 'loading';
+  const displayPercent = status === 'ready' ? 100 : (total > 0 ? Math.max(4, clamped) : 12);
+  $('traj-list-progress-fill').style.width = `${displayPercent}%`;
+  $('loading-progress-fill').style.width = `${displayPercent}%`;
+
+  if (status === 'error') {
+    $('traj-list-progress-text').textContent = '列表失败';
+    $('loading-submsg').textContent = '轨迹列表加载失败';
+  } else if (total > 0) {
+    const text = `${Math.floor(clamped)}% ${loaded}/${total}`;
+    $('traj-list-progress-text').textContent = text;
+    $('loading-submsg').textContent = `轨迹列表 ${text}`;
+  } else {
+    $('traj-list-progress-text').textContent = '列表加载中';
+    $('loading-submsg').textContent = '轨迹列表加载中';
+  }
+}
+
+function setTrajectoryListLoading(loading, progress = {}) {
+  _trajectoryListLoading = !!loading;
+  $('traj-search-wrap').classList.toggle('list-loading', _trajectoryListLoading);
+  if (_trajectoryListLoading) {
+    updateTrajectoryListProgress(progress);
+    $('loading-progress').classList.add('open');
+  } else {
+    stopTrajectoryListProgressPolling();
+    $('traj-list-progress-fill').style.width = '0%';
+    $('traj-list-progress-text').textContent = '';
+    $('loading-submsg').textContent = '';
+    $('loading-progress').classList.remove('open');
+    $('loading-progress-fill').style.width = '0%';
+  }
+}
+
+function trajectoryProgressUrl(sessionId) {
+  const url = './api/trajectories/progress';
+  if (!sessionId) return url;
+  return `${url}?session_id=${encodeURIComponent(sessionId)}`;
+}
+
+function trajectoryListUrl(sessionId) {
+  const url = './api/trajectories';
+  if (!sessionId) return url;
+  return `${url}?session_id=${encodeURIComponent(sessionId)}`;
+}
+
+async function pollTrajectoryListProgress(seq, sessionId) {
+  try {
+    const progress = await apiFetch(trajectoryProgressUrl(sessionId));
+    if (seq !== _trajectoryListSeq || sessionId !== S.datasetSessionId || !_trajectoryListLoading) return;
+    updateTrajectoryListProgress(progress);
+  } catch {}
+  if (seq === _trajectoryListSeq && sessionId === S.datasetSessionId && _trajectoryListLoading) {
+    _trajectoryProgressPollTimer = setTimeout(() => {
+      void pollTrajectoryListProgress(seq, sessionId);
+    }, 500);
+  }
+}
+
+function startTrajectoryListProgressPolling(seq, sessionId) {
+  stopTrajectoryListProgressPolling();
+  void pollTrajectoryListProgress(seq, sessionId);
+}
+
 function stopPlay() {
   if (S.playTimer) { clearInterval(S.playTimer); S.playTimer = null; }
   S._playing = false;
@@ -1757,6 +1953,9 @@ function setTrajectoryList(trajs, options = {}) {
         : _allTrajs.find(traj => traj.index === S.trajIndex);
       $('traj-search').value = active?.label || _allTrajs[0].label;
     }
+    if (options.refreshDropdown !== false) {
+      renderDropdown($('traj-search').value || '');
+    }
   } else if (options.clearOnEmpty !== false) {
     clearTrajectoryVisuals();
   }
@@ -1820,14 +2019,30 @@ function renderIndexDetails() {
 async function fetchTrajectories(options = {}) {
   const seq = ++_trajectoryListSeq;
   const sessionId = S.datasetSessionId;
+  setTrajectoryListLoading(true, {
+    status: 'loading',
+    loaded: 0,
+    total: 0,
+    message: '轨迹列表加载中',
+  });
+  startTrajectoryListProgressPolling(seq, sessionId);
   try {
-    const payload = await apiFetch(withSession('./api/trajectories'));
+    const payload = await apiFetch(trajectoryListUrl(sessionId));
     if (seq !== _trajectoryListSeq || sessionId !== S.datasetSessionId) return [];
     const trajs = Array.isArray(payload) ? payload : [];
     setTrajectoryList(trajs, {
       updateSearch: !!options.updateSearch,
       clearOnEmpty: options.clearOnEmpty !== false,
     });
+    updateTrajectoryListProgress({
+      status: 'ready',
+      loaded: trajs.length,
+      total: trajs.length,
+      percent: 100,
+      message: '轨迹列表已加载',
+    });
+    setTrajectoryListLoading(false);
+    renderDropdown($('traj-search').value || '');
     if (options.linkState && (options.linkState.trajUuid || Number.isInteger(options.linkState.trajIndex))) {
       const target = findTrajectoryByLinkState(options.linkState);
       if (target && target.index !== S.trajIndex) {
@@ -1839,8 +2054,19 @@ async function fetchTrajectories(options = {}) {
     if (seq === _trajectoryListSeq) {
       console.error('加载轨迹列表失败:', e);
       setTrajectoryList([], { clearOnEmpty: false });
+      updateTrajectoryListProgress({
+        status: 'error',
+        loaded: 0,
+        total: 0,
+        message: '轨迹列表加载失败',
+      });
+      setTrajectoryListLoading(false);
     }
     return [];
+  } finally {
+    if (seq === _trajectoryListSeq && sessionId === S.datasetSessionId) {
+      stopTrajectoryListProgressPolling();
+    }
   }
 }
 
@@ -1860,6 +2086,8 @@ async function loadDatasetFromPath(path, options = {}) {
   }
   stopPlay();
   showLoading('切换数据源…');
+  _trajectoryListSeq += 1;
+  setTrajectoryListLoading(false);
   const loadSeq = ++_datasetLoadSeq;
   try {
     const result = await apiFetch('./api/dataset/load', {
@@ -1884,9 +2112,15 @@ async function loadDatasetFromPath(path, options = {}) {
       ? result.default_trajectory_index
       : 0;
     const targetIndex = Number.isInteger(options.trajIndex) ? options.trajIndex : defaultIndex;
+    const needsUuidResolve = !!options.trajUuid;
+    if (!needsUuidResolve) {
+      void fetchTrajectories({ updateSearch: false, clearOnEmpty: false });
+    }
     await loadTrajectory(targetIndex, { frame: options.frame });
     if (loadSeq !== _datasetLoadSeq) return;
-    void fetchTrajectories({ updateSearch: false, clearOnEmpty: false, linkState: options });
+    if (needsUuidResolve) {
+      void fetchTrajectories({ updateSearch: false, clearOnEmpty: false, linkState: options });
+    }
   } catch (e) {
     hideLoading();
     alert(`数据源加载失败: ${e.message}`);
@@ -2097,8 +2331,14 @@ async function loadTrajectory(index, options = {}) {
     if (loadSeq !== _trajectoryLoadSeq) return;
     hideLoading();
 
+    const backgroundLabel = '物体、曲线';
+    clearStatusToasts();
+    showStatusToast(`${backgroundLabel}正在加载中`);
+
+    const backgroundTasks = [];
     if (info.has_object_mesh) {
-      void apiFetch(withSession(`./api/object_mesh/${index}`))
+      backgroundTasks.push(
+        apiFetch(withSession(`./api/object_mesh/${index}`))
         .then(payload => {
           if (loadSeq !== _trajectoryLoadSeq) return;
           applyObjectMeshData(payload);
@@ -2110,10 +2350,12 @@ async function loadTrajectory(index, options = {}) {
           if (loadSeq !== _trajectoryLoadSeq) return;
           console.warn('object mesh load failed', e);
           applyObjectMeshData([]);
-        });
+        })
+      );
     }
 
-    void apiFetch(withSession(`./api/curves/${index}/all`))
+    backgroundTasks.push(
+      apiFetch(withSession(`./api/curves/${index}/all`))
       .then(allCurves => {
         if (loadSeq !== _trajectoryLoadSeq) return;
         S.curveData = allCurves || {};
@@ -2122,7 +2364,13 @@ async function loadTrajectory(index, options = {}) {
       .catch(e => {
         if (loadSeq !== _trajectoryLoadSeq) return;
         console.error('批量获取曲线失败:', e);
-      });
+      })
+    );
+
+    Promise.allSettled(backgroundTasks).then(() => {
+      if (loadSeq !== _trajectoryLoadSeq) return;
+      showStatusToast(`${backgroundLabel}加载完毕`);
+    });
 
     const shareUrl = buildShareUrl();
     window.history.replaceState({}, '', shareUrl);
@@ -2252,12 +2500,17 @@ function setTrajectorySearchMode(mode) {
 }
 
 function renderDropdown(keyword) {
-  const matched = filterTrajectories(keyword);
-  const items = matched.slice(0, SHOW_MAX);
   const dd = $('traj-dropdown');
   dd.innerHTML = '';
+  if (_trajectoryListLoading && !_allTrajs.length) {
+    dd.innerHTML = '<div class="traj-item traj-item-muted">轨迹列表加载中，请稍候…</div>';
+    dd.classList.add('open');
+    return;
+  }
+  const matched = filterTrajectories(keyword);
+  const items = matched.slice(0, SHOW_MAX);
   if (!items.length) {
-    dd.innerHTML = '<div class="traj-item" style="color:#bfbfbf">无匹配结果</div>';
+    dd.innerHTML = '<div class="traj-item traj-item-muted">无匹配结果</div>';
   } else {
     items.forEach(({ label, index }) => {
       const el = document.createElement('div');
@@ -2426,8 +2679,8 @@ $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ �
       const defaultIndex = Number.isInteger(current.default_trajectory_index)
         ? current.default_trajectory_index
         : 0;
-      await loadTrajectory(defaultIndex);
       void fetchTrajectories({ updateSearch: false, clearOnEmpty: false });
+      await loadTrajectory(defaultIndex);
     } else {
       clearSourceSelection();
       clearTrajectoryVisuals();
