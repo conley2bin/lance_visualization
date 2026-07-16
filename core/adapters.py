@@ -33,9 +33,15 @@ class MeshPayload(TypedDict):
     k: list[int]
 
 
-class ObjectMeshPayload(MeshPayload, total=False):
+class ObjectMeshPayload(TypedDict, total=False):
     name: str
     objects: list[dict[str, Any]]
+    x: list[float]
+    y: list[float]
+    z: list[float]
+    i: list[int]
+    j: list[int]
+    k: list[int]
 
 
 class PointsPayload(TypedDict):
@@ -92,6 +98,7 @@ class LoadPayload(TypedDict, total=False):
     num_cameras: int
     num_hands: int
     hand_names: list[str]
+    default_trajectory_index: int
     has_urdf: bool
     object_names: list[str]
     missing_object_meshes: list[str]

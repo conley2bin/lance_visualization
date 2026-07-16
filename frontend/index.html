@@ -462,6 +462,8 @@ const S = {
   searchMode: 'name',
   assetsVersion: '',
   assetsReloading: false,
+  lastFrame3D: null,
+  lastCma: null,
 };
 
 // ════════════════════════════════════════════════════════
@@ -557,6 +559,9 @@ async function copyTextToClipboard(text) {
 // 竞态保护：每次 refreshFrame 生成唯一序号，过时响应直接丢弃
 let _frameSeq = 0;
 let _frameAbort = null;
+let _datasetLoadSeq = 0;
+let _trajectoryLoadSeq = 0;
+let _trajectoryListSeq = 0;
 let _browserState = { path: '', parent: null, roots: [] };
 let _recentLanceRecords = [];
 let _assetsVersionPollTimer = null;
@@ -759,6 +764,26 @@ function normalizeObjectMeshPayload(payload) {
   if (Array.isArray(payload)) return payload.filter(Boolean);
   if (Array.isArray(payload.objects)) return payload.objects.filter(Boolean);
   return [payload];
+}
+
+function applyObjectMeshData(payload) {
+  objectMeshData = normalizeObjectMeshPayload(payload);
+  ensureObjectVisuals(objectMeshData.length);
+  if (!objectMeshData.length) {
+    hideAllObjectVisuals();
+    setObjectAxesLength(0.12);
+    return;
+  }
+
+  objectMeshData.forEach((meshData, meshIdx) => {
+    const visual = objectVisuals[meshIdx];
+    setMesh(visual.mesh, meshData);
+    visual.mesh.geometry.computeBoundingSphere();
+    visual.mesh.visible = false;
+  });
+  for (let i = objectMeshData.length; i < objectVisuals.length; i++) hideObjectVisual(objectVisuals[i]);
+  const firstMesh = objectVisuals[0]?.mesh;
+  setObjectAxesLength((firstMesh?.geometry.boundingSphere?.radius || 0.12) * 0.55);
 }
 
 let objectAxesLength = 0.12;
@@ -1406,6 +1431,8 @@ async function refreshFrame() {
     if (seq !== _frameSeq) return;
 
     try {
+      S.lastFrame3D = d3 || null;
+      S.lastCma = dcma || null;
       if (d3) apply3D(d3);
     } catch (e) {
       console.warn('3D view update failed', e);
@@ -1696,6 +1723,8 @@ function clearTrajectoryVisuals() {
   S.frameIdx = 0;
   S.numCameras = 0;
   S.curveData = {};
+  S.lastFrame3D = null;
+  S.lastCma = null;
   S.currentTrajectoryInfoBase = '';
   S.currentIndexData = null;
   S.currentTrajectoryUuid = '';
@@ -1722,7 +1751,12 @@ function clearTrajectoryVisuals() {
 function setTrajectoryList(trajs, options = {}) {
   _allTrajs = Array.isArray(trajs) ? trajs : [];
   if (_allTrajs.length) {
-    if (options.updateSearch !== false) $('traj-search').value = _allTrajs[0].label;
+    if (options.updateSearch) {
+      const active = S.trajIndex === null
+        ? null
+        : _allTrajs.find(traj => traj.index === S.trajIndex);
+      $('traj-search').value = active?.label || _allTrajs[0].label;
+    }
   } else if (options.clearOnEmpty !== false) {
     clearTrajectoryVisuals();
   }
@@ -1783,6 +1817,33 @@ function renderIndexDetails() {
   panel.classList.add('open');
 }
 
+async function fetchTrajectories(options = {}) {
+  const seq = ++_trajectoryListSeq;
+  const sessionId = S.datasetSessionId;
+  try {
+    const payload = await apiFetch(withSession('./api/trajectories'));
+    if (seq !== _trajectoryListSeq || sessionId !== S.datasetSessionId) return [];
+    const trajs = Array.isArray(payload) ? payload : [];
+    setTrajectoryList(trajs, {
+      updateSearch: !!options.updateSearch,
+      clearOnEmpty: options.clearOnEmpty !== false,
+    });
+    if (options.linkState && (options.linkState.trajUuid || Number.isInteger(options.linkState.trajIndex))) {
+      const target = findTrajectoryByLinkState(options.linkState);
+      if (target && target.index !== S.trajIndex) {
+        void loadTrajectory(target.index, { frame: options.linkState.frame });
+      }
+    }
+    return trajs;
+  } catch (e) {
+    if (seq === _trajectoryListSeq) {
+      console.error('加载轨迹列表失败:', e);
+      setTrajectoryList([], { clearOnEmpty: false });
+    }
+    return [];
+  }
+}
+
 function clearSourceSelection() {
   S.lancePath = '';
   $('source-path').value = '';
@@ -1799,26 +1860,33 @@ async function loadDatasetFromPath(path, options = {}) {
   }
   stopPlay();
   showLoading('切换数据源…');
+  const loadSeq = ++_datasetLoadSeq;
   try {
     const result = await apiFetch('./api/dataset/load', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lance_path: lancePath, session_id: S.datasetSessionId || null }),
+      body: JSON.stringify({
+        lance_path: lancePath,
+        session_id: S.datasetSessionId || null,
+        include_trajectories: false,
+      }),
     });
+    if (loadSeq !== _datasetLoadSeq) return;
     setDatasetSessionId(result.session_id || '');
     S.lancePath = result.lance_path || lancePath;
     const currentRecord = _recentLanceRecords.find(item => item.dataset_path === S.lancePath);
     $('source-path').value = currentRecord?.dataset_name || currentRecord?.dataset_path || result.lance_path || lancePath;
     $('source-path').dataset.selectedPath = S.lancePath;
     $('source-path').dataset.selectedName = currentRecord?.dataset_name || currentRecord?.dataset_path || '';
-    setTrajectoryList(result.trajectories || []);
-    if (_allTrajs.length) {
-      const target = findTrajectoryByLinkState(options);
-      await loadTrajectory(target.index, { frame: options.frame });
-    } else {
-      clearTrajectoryVisuals();
-      hideLoading();
-    }
+    setTrajectoryList([], { clearOnEmpty: false });
+    clearTrajectoryVisuals();
+    const defaultIndex = Number.isInteger(result.default_trajectory_index)
+      ? result.default_trajectory_index
+      : 0;
+    const targetIndex = Number.isInteger(options.trajIndex) ? options.trajIndex : defaultIndex;
+    await loadTrajectory(targetIndex, { frame: options.frame });
+    if (loadSeq !== _datasetLoadSeq) return;
+    void fetchTrajectories({ updateSearch: false, clearOnEmpty: false, linkState: options });
   } catch (e) {
     hideLoading();
     alert(`数据源加载失败: ${e.message}`);
@@ -1986,9 +2054,11 @@ async function browseDataSource(path) {
 // ════════════════════════════════════════════════════════
 async function loadTrajectory(index, options = {}) {
   stopPlay();
+  const loadSeq = ++_trajectoryLoadSeq;
   showLoading(`加载轨迹 ${index}…`);
   try {
     const info = await apiFetch(withSession(`./api/trajectory/${index}/load`));
+    if (loadSeq !== _trajectoryLoadSeq) return;
     if (info.assets_version) S.assetsVersion = info.assets_version;
     S.trajIndex = index;
     S.totalFrames = info.total_frames;
@@ -1998,41 +2068,13 @@ async function loadTrajectory(index, options = {}) {
       : 0;
     S.numCameras = info.num_cameras;
     S.curveData = {};
+    S.lastFrame3D = null;
+    S.lastCma = null;
     S.currentIndexData = info.index_data || null;
     S.currentTrajectoryUuid = info.index_data?.uuid || info.uuid || '';
     const currentTraj = _allTrajs.find(traj => traj.index === index);
     $('traj-search').value = currentTraj?.label || info.label || '';
-
-    // 加载物体网格（只加载一次）
-    if (info.has_object_mesh) {
-      try {
-        objectMeshData = normalizeObjectMeshPayload(await apiFetch(withSession(`./api/object_mesh/${index}`)));
-        ensureObjectVisuals(objectMeshData.length);
-        if (objectMeshData.length) {
-          objectMeshData.forEach((meshData, meshIdx) => {
-            const visual = objectVisuals[meshIdx];
-            setMesh(visual.mesh, meshData);
-            visual.mesh.geometry.computeBoundingSphere();
-            visual.mesh.visible = false;
-          });
-          for (let i = objectMeshData.length; i < objectVisuals.length; i++) hideObjectVisual(objectVisuals[i]);
-          const firstMesh = objectVisuals[0].mesh;
-          setObjectAxesLength((firstMesh.geometry.boundingSphere?.radius || 0.12) * 0.55);
-        } else {
-          hideAllObjectVisuals();
-          setObjectAxesLength(0.12);
-        }
-      } catch (e) {
-        console.warn('object mesh load failed', e);
-        objectMeshData = [];
-        hideAllObjectVisuals();
-        setObjectAxesLength(0.12);
-      }
-    } else {
-      objectMeshData = [];
-      hideAllObjectVisuals();
-      setObjectAxesLength(0.12);
-    }
+    applyObjectMeshData([]);
 
     S.currentTrajectoryInfoBase = info.label || `${info.title}  ·  ${info.subtitle}  ·  ${info.total_frames} 帧`;
     renderTrajectoryInfo();
@@ -2051,21 +2093,43 @@ async function loadTrajectory(index, options = {}) {
     const opts = info.curve_options || [];
     renderCurveTree(opts, defaultCurveNames(opts));
 
+    await refreshFrame();
+    if (loadSeq !== _trajectoryLoadSeq) return;
+    hideLoading();
 
-    // 预取曲线数据（批量获取）
-    showLoading('预取曲线数据…');
-    try {
-      const allCurves = await apiFetch(withSession(`./api/curves/${index}/all`));
-      S.curveData = allCurves;
-    } catch (e) {
-      console.error('批量获取曲线失败:', e);
+    if (info.has_object_mesh) {
+      void apiFetch(withSession(`./api/object_mesh/${index}`))
+        .then(payload => {
+          if (loadSeq !== _trajectoryLoadSeq) return;
+          applyObjectMeshData(payload);
+          if (S.lastFrame3D && S.trajIndex === index) {
+            apply3D(S.lastFrame3D);
+          }
+        })
+        .catch(e => {
+          if (loadSeq !== _trajectoryLoadSeq) return;
+          console.warn('object mesh load failed', e);
+          applyObjectMeshData([]);
+        });
     }
 
-    await refreshFrame();
+    void apiFetch(withSession(`./api/curves/${index}/all`))
+      .then(allCurves => {
+        if (loadSeq !== _trajectoryLoadSeq) return;
+        S.curveData = allCurves || {};
+        drawCurve();
+      })
+      .catch(e => {
+        if (loadSeq !== _trajectoryLoadSeq) return;
+        console.error('批量获取曲线失败:', e);
+      });
+
     const shareUrl = buildShareUrl();
     window.history.replaceState({}, '', shareUrl);
   } finally {
-    hideLoading();
+    if (loadSeq === _trajectoryLoadSeq) {
+      hideLoading();
+    }
   }
 }
 
@@ -2357,14 +2421,13 @@ $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ �
       $('source-path').value = currentRecord?.dataset_name || currentRecord?.dataset_path || '';
       $('source-path').dataset.selectedPath = S.lancePath;
       $('source-path').dataset.selectedName = currentRecord?.dataset_name || currentRecord?.dataset_path || '';
-      const trajs = await apiFetch(withSession('./api/trajectories'));
-      setTrajectoryList(trajs);
-      if (_allTrajs.length) {
-        await loadTrajectory(_allTrajs[0].index);
-      } else {
-        clearTrajectoryVisuals();
-        hideLoading();
-      }
+      setTrajectoryList([], { clearOnEmpty: false });
+      clearTrajectoryVisuals();
+      const defaultIndex = Number.isInteger(current.default_trajectory_index)
+        ? current.default_trajectory_index
+        : 0;
+      await loadTrajectory(defaultIndex);
+      void fetchTrajectories({ updateSearch: false, clearOnEmpty: false });
     } else {
       clearSourceSelection();
       clearTrajectoryVisuals();

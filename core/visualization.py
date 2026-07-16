@@ -10,6 +10,7 @@ import numpy as np
 import trimesh
 
 from .mano import generate_mano_vertices, load_mano_faces, transform_mano_to_world
+from .operator_identity import normalize_operator_key, normalize_operator_name
 from .urdf_helper import URDFHelper
 
 
@@ -46,7 +47,7 @@ def _resolve_mano_model_path(mano_model_path: str, hand: str, project_root: Path
 
 
 def _resolve_urdf_path(project_root: Path, operator: str, hand: str) -> Path | None:
-    operator_dir = project_root / "assets" / "operators" / operator
+    operator_dir = project_root / "assets" / "operators" / normalize_operator_key(operator)
     if hand == "left":
         candidates = [
             operator_dir / "left" / "mano_hand.urdf",
@@ -120,7 +121,7 @@ class TrajectoryState:
         hand_rows = _as_list(lance_row.get("hands"))
         hand_names = _as_list(meta.get("hand_names"))
         mano_shapes = _as_list(meta.get("mano_hand_shapes"))
-        operator = (lance_row.get("index") or {}).get("operator", "")
+        operator = normalize_operator_name((lance_row.get("index") or {}).get("operator", ""))
 
         for idx, hand_row in enumerate(hand_rows):
             hand_name = _normalize_hand_name(

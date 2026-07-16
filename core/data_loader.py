@@ -1,6 +1,8 @@
 import lance
 from collections import OrderedDict
 
+from .operator_identity import normalize_operator_name
+
 
 def _sort_text(value: str | None) -> str:
     return str(value or "").casefold()
@@ -15,7 +17,7 @@ def _display_scene(index_data: dict | None, meta: dict | None) -> str:
 
 def _trajectory_label(index: int, index_data: dict | None, meta: dict | None) -> str:
     scene = _display_scene(index_data, meta)
-    operator = index_data.get("operator", "?") if index_data else "?"
+    operator = normalize_operator_name(index_data.get("operator", "?")) if index_data else "?"
     gesture = index_data.get("gesture", "") if index_data else ""
     frames = meta.get("total_frames", 0) if meta else 0
     frame_text = f"{frames}帧" if frames > 0 else "不可用"
@@ -49,7 +51,7 @@ class OptimizedLanceLoader:
                     "scene": index_data["scene"],
                     "display_scene": _display_scene(index_data, meta),
                     "gesture": index_data.get("gesture", ""),
-                    "operator": index_data["operator"],
+                    "operator": normalize_operator_name(index_data.get("operator", "N/A")),
                     "frames": meta["total_frames"],
                     "label": _trajectory_label(index, index_data, meta),
                     "uuid": (index_data.get("uuid") or "")[:16],
@@ -128,7 +130,7 @@ class OptimizedLanceLoader:
                     "scene": index_data.get("scene", "?"),
                     "display_scene": scene,
                     "gesture": index_data.get("gesture", ""),
-                    "operator": index_data.get("operator", "?"),
+                    "operator": normalize_operator_name(index_data.get("operator", "?")),
                     "frames": frames,
                     "label": label,
                     "uuid": (index_data.get("uuid") or "")[:16],

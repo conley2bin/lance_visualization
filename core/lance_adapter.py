@@ -112,10 +112,7 @@ class LanceViewerAdapter(ViewerAdapter):
             })
         if not meshes:
             return None
-        return {
-            **meshes[0],
-            "objects": meshes,
-        }
+        return {"objects": meshes}
 
     def get_video_frame_payload(
         self,

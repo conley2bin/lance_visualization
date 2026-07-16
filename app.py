@@ -291,6 +291,7 @@ def _make_dataset_response(session: dict) -> dict:
         "session_id": session["id"],
         "lance_path": config.get("paths", {}).get("lance_dataset", ""),
         "total_items": adapter.total_items,
+        "default_trajectory_index": config.get("defaults", {}).get("trajectory_index", 0),
         "viewer_type": config.get("viewer", {}).get("type", "lance"),
         "browser_roots": [str(root) for root in _get_browser_roots()],
     }
@@ -326,6 +327,7 @@ def _ensure_dataset_selected(session: dict) -> None:
 class DatasetLoadPayload(BaseModel):
     lance_path: str
     session_id: str | None = None
+    include_trajectories: bool = True
 
 
 class RecentDatasetNamespaceBinding(BaseModel):
@@ -534,10 +536,10 @@ def load_dataset(payload: DatasetLoadPayload):
         raise HTTPException(status_code=400, detail=f"Lance 数据源加载失败: {exc}") from exc
 
     print(f"[dataset] session={new_session['id']} 已切换 Lance 数据源: {lance_path}")
-    return {
-        **_make_dataset_response(new_session),
-        "trajectories": new_session["adapter"].list_items(),
-    }
+    result = _make_dataset_response(new_session)
+    if payload.include_trajectories:
+        result["trajectories"] = new_session["adapter"].list_items()
+    return result
 
 @app.get("/api/trajectories")
 def list_trajectories(session_id: str | None = None):
