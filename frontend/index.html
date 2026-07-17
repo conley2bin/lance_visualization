@@ -563,6 +563,7 @@ const S = {
   playTimer: null,
   _playing: false,
   playFps: 15,
+  playRenderFps: 45,
   showTrajectoryIndex: false,
   currentTrajectoryInfoBase: '',
   currentIndexData: null,
@@ -786,7 +787,7 @@ function startTrajectoryListProgressPolling(seq, sessionId) {
 }
 
 function stopPlay() {
-  if (S.playTimer) { clearInterval(S.playTimer); S.playTimer = null; }
+  if (S.playTimer) { clearTimeout(S.playTimer); S.playTimer = null; }
   S._playing = false;
 }
 
@@ -2649,16 +2650,20 @@ $('btn-play').onclick = () => {
   if (S._playing) return; // 防止重复点击
   stopPlay();
   S._playing = true;
-  const interval = 10; // 原始 CMA 数据固定 100Hz，每两帧间隔 0.01 秒
+  const sourceFrameMs = 10; // 原始 CMA 数据固定 100Hz，每两帧间隔 0.01 秒
+  const renderFrameMs = Math.max(20, 1000 / (S.playRenderFps || 45));
   const startFrame = S.frameIdx;
   const startTime = performance.now();
+  let nextRenderTime = startTime;
 
-  function nextDueDelay() {
+  function nextRenderDelay() {
     const elapsed = performance.now() - startTime;
-    const elapsedFrames = Math.floor(elapsed / interval);
-    const nextFrame = Math.min(S.totalFrames - 1, startFrame + elapsedFrames + 1);
-    const nextDueTime = startTime + (nextFrame - startFrame) * interval;
-    return Math.max(0, nextDueTime - performance.now());
+    const targetFrame = startFrame + Math.floor(elapsed / sourceFrameMs);
+    if (targetFrame <= S.frameIdx) {
+      const nextSourceTime = startTime + (S.frameIdx + 1 - startFrame) * sourceFrameMs;
+      return Math.max(0, Math.max(nextRenderTime, nextSourceTime) - performance.now());
+    }
+    return Math.max(0, nextRenderTime - performance.now());
   }
 
   async function step() {
@@ -2667,21 +2672,22 @@ $('btn-play').onclick = () => {
     const elapsed = performance.now() - startTime;
     const targetFrame = Math.min(
       S.totalFrames - 1,
-      startFrame + Math.floor(elapsed / interval)
+      startFrame + Math.floor(elapsed / sourceFrameMs)
     );
     if (targetFrame <= S.frameIdx) {
-      S.playTimer = setTimeout(step, nextDueDelay());
+      S.playTimer = setTimeout(step, nextRenderDelay());
       return;
     }
     S.frameIdx = targetFrame;
     $('frame-slider').value = S.frameIdx;
+    nextRenderTime = Math.max(nextRenderTime + renderFrameMs, performance.now());
     await refreshFrame();
     if (!S._playing) return;
     if (S.frameIdx >= S.totalFrames - 1) { stopPlay(); $('btn-play').textContent = '▶ 播放'; return; }
-    S.playTimer = setTimeout(step, nextDueDelay());
+    S.playTimer = setTimeout(step, nextRenderDelay());
   }
   $('btn-play').textContent = '⏸ 播放中';
-  S.playTimer = setTimeout(step, interval);
+  S.playTimer = setTimeout(step, 0);
 };
 $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ 播放'; };
 
