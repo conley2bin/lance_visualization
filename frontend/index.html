@@ -114,7 +114,29 @@ body {
   max-height: 260px; overflow-y: auto; margin-top: 2px;
 }
 #traj-dropdown.open { display: block; }
-.traj-item { padding: 5px 8px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.traj-item {
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.traj-item-main {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.traj-item-interval {
+  flex: 0 0 auto;
+  color: #94a3b8;
+  font-size: 11px;
+  white-space: nowrap;
+}
 .traj-item:hover, .traj-item.active { background: #f8f9fa; color: #1890ff; }
 .traj-item-muted { color: #94a3b8; cursor: default; }
 
@@ -2310,7 +2332,7 @@ async function loadTrajectory(index, options = {}) {
     $('traj-search').value = currentTraj?.label || info.label || '';
     applyObjectMeshData([]);
 
-    S.currentTrajectoryInfoBase = info.label || `${info.title}  ·  ${info.subtitle}  ·  ${info.total_frames} 帧`;
+    S.currentTrajectoryInfoBase = formatTrajectoryInfoBase(info);
     renderTrajectoryInfo();
     renderIndexDetails();
     $('frame-slider').max = info.total_frames - 1;
@@ -2396,6 +2418,11 @@ const SHOW_MAX = Infinity;
 
 function trajectoryDisplayLabel(label, index) {
   return label;
+}
+
+function formatTrajectoryInfoBase(info) {
+  const base = info.label || `${info.title}  ·  ${info.subtitle}  ·  ${info.total_frames} 帧`;
+  return info.motion_interval ? `${base}  ·  运动区间 ${info.motion_interval}` : base;
 }
 
 function normalizeSearchText(value) {
@@ -2503,19 +2530,29 @@ function renderDropdown(keyword) {
   const dd = $('traj-dropdown');
   dd.innerHTML = '';
   if (_trajectoryListLoading && !_allTrajs.length) {
-    dd.innerHTML = '<div class="traj-item traj-item-muted">轨迹列表加载中，请稍候…</div>';
+    dd.innerHTML = '<div class="traj-item traj-item-muted"><span class="traj-item-main">轨迹列表加载中，请稍候…</span></div>';
     dd.classList.add('open');
     return;
   }
   const matched = filterTrajectories(keyword);
   const items = matched.slice(0, SHOW_MAX);
   if (!items.length) {
-    dd.innerHTML = '<div class="traj-item traj-item-muted">无匹配结果</div>';
+    dd.innerHTML = '<div class="traj-item traj-item-muted"><span class="traj-item-main">无匹配结果</span></div>';
   } else {
-    items.forEach(({ label, index }) => {
+    items.forEach(({ label, index, motion_interval }) => {
       const el = document.createElement('div');
       el.className = 'traj-item';
-      el.textContent = trajectoryDisplayLabel(label, index);
+      const main = document.createElement('span');
+      main.className = 'traj-item-main';
+      main.textContent = trajectoryDisplayLabel(label, index);
+      el.appendChild(main);
+      if (motion_interval) {
+        const interval = document.createElement('span');
+        interval.className = 'traj-item-interval';
+        interval.textContent = `[${motion_interval}]`;
+        interval.title = `运动区间 ${motion_interval}`;
+        el.appendChild(interval);
+      }
       if (index === S.trajIndex) el.classList.add('active');
       el.onclick = () => {
         $('traj-search').value = label;

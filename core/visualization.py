@@ -4,6 +4,7 @@
 不依赖任何 ipywidgets / Plotly FigureWidget；
 返回纯 Python dict，可直接序列化为 JSON 传给前端。
 """
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -58,12 +59,14 @@ def _resolve_urdf_path(project_root: Path, operator: str, hand: str) -> Path | N
             operator_dir / "right" / "mano_hand.urdf",
             operator_dir / "mano_right_hand.urdf",
             operator_dir / "mano_hand.urdf",
-        ]
+    ]
     return next((path for path in candidates if path.exists()), None)
 
 
-def _load_object_mesh(project_root: Path, object_name: str) -> dict | None:
-    objects_dir = project_root / "assets/objects"
+@lru_cache(maxsize=128)
+def _load_object_mesh_cached(project_root: str, object_name: str) -> dict | None:
+    project_root_path = Path(project_root)
+    objects_dir = project_root_path / "assets/objects"
     if not object_name or not objects_dir.exists():
         return None
 
@@ -86,6 +89,59 @@ def _load_object_mesh(project_root: Path, object_name: str) -> dict | None:
             except Exception:
                 pass
     return None
+
+
+@lru_cache(maxsize=256)
+def _object_mesh_exists_cached(project_root: str, object_name: str) -> bool:
+    project_root_path = Path(project_root)
+    _, candidates = _object_mesh_candidates(project_root_path, object_name)
+    return any(path.exists() for path in candidates)
+
+
+class LazyObjectMesh:
+    """延迟加载物体 mesh，只在真正请求时读磁盘。"""
+
+    def __init__(self, project_root: Path, object_name: str):
+        self.project_root = project_root
+        self.object_name = object_name
+
+    def exists(self) -> bool:
+        return _object_mesh_exists_cached(str(self.project_root), self.object_name)
+
+    def get(self) -> dict | None:
+        return _load_object_mesh_cached(str(self.project_root), self.object_name)
+
+
+def _load_object_mesh(project_root: Path, object_name: str) -> dict | None:
+    return _load_object_mesh_cached(str(project_root), object_name)
+
+
+def object_has_mesh(obj: dict) -> bool:
+    mesh = obj.get("mesh")
+    if hasattr(mesh, "exists"):
+        return bool(mesh.exists())
+    return mesh is not None
+
+
+def object_mesh_data(obj: dict) -> dict | None:
+    mesh = obj.get("mesh")
+    if hasattr(mesh, "get"):
+        return mesh.get()
+    return mesh
+
+
+def _object_mesh_candidates(project_root: Path, object_name: str) -> tuple[str, list[Path]]:
+    objects_dir = project_root / "assets/objects"
+    if not object_name or not objects_dir.exists():
+        return object_name, []
+
+    # 用 assets/objects 中的目录名做前缀匹配，兼容 cuboid2H → cuboid2 等变体
+    known = sorted([d.name for d in objects_dir.iterdir() if d.is_dir()], key=len, reverse=True)
+    matched = next((n for n in known if object_name.startswith(n)), None) or object_name
+    return matched, [
+        objects_dir / matched / f"{matched}_aligned.stl",
+        objects_dir / f"{matched}_aligned.stl",
+    ]
 
 
 def _mesh_payload(vertices: np.ndarray, faces: np.ndarray) -> dict:
@@ -112,16 +168,25 @@ class TrajectoryState:
         hand: str,
         project_root: Path,
     ):
-        self.lance_row = lance_row
+        index_data = dict(lance_row.get("index") or {})
+        meta = dict(lance_row.get("trajectory_metadata") or {})
+        object_names = _as_list(meta.get("object_names"))
+
+        self.index_data = {
+            "scene": index_data.get("scene", ""),
+            "operator": index_data.get("operator", ""),
+            "uuid": index_data.get("uuid", ""),
+            "file_uuid": index_data.get("file_uuid", ""),
+            "capMachine": index_data.get("capMachine", "unknown"),
+        }
         self.hand = _normalize_hand_name(hand, "right")
         self.hands: list[dict] = []
         self.objects: list[dict] = []
-        meta = lance_row.get("trajectory_metadata") or {}
 
         hand_rows = _as_list(lance_row.get("hands"))
         hand_names = _as_list(meta.get("hand_names"))
         mano_shapes = _as_list(meta.get("mano_hand_shapes"))
-        operator = normalize_operator_name((lance_row.get("index") or {}).get("operator", ""))
+        operator = normalize_operator_name(self.index_data.get("operator", ""))
 
         for idx, hand_row in enumerate(hand_rows):
             hand_name = _normalize_hand_name(
@@ -182,19 +247,32 @@ class TrajectoryState:
                 "name": object_name,
                 "pos": np.array(object_row["pos"], dtype=np.float32),
                 "rot_aa": np.array(object_row["rot_aa"], dtype=np.float32),
-                "mesh": _load_object_mesh(project_root, object_name),
+                "mesh": LazyObjectMesh(project_root, object_name),
             })
 
         self.primary_object_idx = next(
-            (idx for idx, obj in enumerate(self.objects) if obj["mesh"] is not None),
+            (idx for idx, obj in enumerate(self.objects) if object_has_mesh(obj)),
             0,
         )
+        self.scene = self.index_data["scene"]
+        self.trajectory_metadata = {
+            "total_frames": meta.get("total_frames", self.T),
+            "hand_names": hand_names,
+            "mano_hand_shapes": mano_shapes,
+            "object_names": object_names,
+            "trajectory_info": meta.get("trajectory_info") or {},
+        }
+        self.lance_row = {
+            "index": self.index_data,
+            "trajectory_metadata": self.trajectory_metadata,
+        }
+        if "cma_data" in lance_row:
+            self.lance_row["cma_data"] = lance_row["cma_data"]
         self.object_mesh: dict | None = None
         if self.objects:
             primary_object = self.objects[self.primary_object_idx]
             self.obj_pos = primary_object["pos"]
             self.obj_rot_aa = primary_object["rot_aa"]
-            self.object_mesh = primary_object["mesh"]
         else:
             self.obj_pos = np.zeros((self.T, 3), dtype=np.float32)
             self.obj_rot_aa = np.zeros((self.T, 3), dtype=np.float32)
@@ -230,7 +308,7 @@ def get_frame_data(
     result: dict = {
         "frame_idx": frame_idx,
         "total_frames": state.T,
-        "scene": state.lance_row["index"]["scene"],
+        "scene": state.scene,
         "hands": [],
         "mano_mesh": None,
         "mano_joints": None,
@@ -303,23 +381,25 @@ def get_frame_data(
     # Object mesh
     if show_object:
         for obj in state.objects:
+            has_mesh = object_has_mesh(obj)
             result["object_poses"].append({
                 "name": obj["name"],
                 "pos": obj["pos"][frame_idx].tolist(),
                 "rot_aa": obj["rot_aa"][frame_idx].tolist(),
-                "has_mesh": obj["mesh"] is not None,
+                "has_mesh": has_mesh,
             })
 
         if state.objects:
             primary = state.objects[state.primary_object_idx]
+            has_mesh = object_has_mesh(primary)
             primary_pose = {
                 "pos": primary["pos"][frame_idx].tolist(),
                 "rot_aa": primary["rot_aa"][frame_idx].tolist(),
                 "name": primary["name"],
-                "has_mesh": primary["mesh"] is not None,
+                "has_mesh": has_mesh,
             }
             result["object_pose"] = primary_pose
-            if primary["mesh"] is not None:
+            if has_mesh:
                 result["object_transform"] = {
                     "position": primary_pose["pos"],
                     "rotation": primary_pose["rot_aa"],

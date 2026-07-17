@@ -7,6 +7,7 @@ class TrajectoryListItem(TypedDict):
     label: str
     index: int
     uuid: str
+    motion_interval: str
 
 
 class TrajectoryListProgress(TypedDict, total=False):
@@ -26,6 +27,8 @@ class TrajectoryInfo(TypedDict, total=False):
     title: str
     subtitle: str
     total_frames: int
+    num_cameras: int
+    motion_interval: str
     scene: str
     display_scene: str
     gesture: str
@@ -113,6 +116,7 @@ class LoadPayload(TypedDict, total=False):
     default_trajectory_index: int
     has_urdf: bool
     object_names: list[str]
+    motion_interval: str
     missing_object_meshes: list[str]
     has_object_mesh: bool
     curve_options: list[str]

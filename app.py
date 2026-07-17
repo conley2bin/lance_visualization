@@ -5,6 +5,7 @@ Lance 可视化 FastAPI 服务
 """
 from pathlib import Path
 from collections import OrderedDict
+from threading import Lock
 
 import copy
 import os
@@ -52,11 +53,13 @@ def index():
 
 _config: dict = {}
 _project_root: Path = Path("/data")
-_MAX_CACHE_SIZE = 10  # 最多缓存10个轨迹状态
+_MAX_CACHE_SIZE = int(os.environ.get("VIZ_STATE_CACHE_SIZE", "4"))
 _DEFAULT_SESSION_ID = "default"
-_MAX_SESSION_COUNT = int(os.environ.get("DATASET_SESSION_LIMIT", "16"))
+_MAX_SESSION_COUNT = int(os.environ.get("DATASET_SESSION_LIMIT", "8"))
 _SESSION_TTL_SECONDS = int(os.environ.get("DATASET_SESSION_TTL_SECONDS", "1800"))
 _sessions: OrderedDict[str, dict] = OrderedDict()
+_state_build_lock_registry: dict[tuple[str, int], Lock] = {}
+_state_build_lock_registry_lock = Lock()
 _assets_version: str | None = None
 
 
@@ -100,6 +103,7 @@ def _create_session(config: dict, session_id: str | None = None) -> dict:
         "config": session_config,
         "adapter": adapter,
         "state_cache": OrderedDict(),
+        "state_build_locks": {},
         "last_access": time.time(),
     }
     _sessions[session_id] = session
@@ -116,12 +120,16 @@ def _cleanup_sessions() -> None:
     ]
     for sid in expired:
         del _sessions[sid]
+        for key in [key for key in _state_build_lock_registry if key[0] == sid]:
+            del _state_build_lock_registry[key]
         print(f"[session] 清理过期数据源 session: {sid}")
 
     while len([sid for sid in _sessions if sid != _DEFAULT_SESSION_ID]) > _MAX_SESSION_COUNT:
         for sid in list(_sessions.keys()):
             if sid != _DEFAULT_SESSION_ID:
                 del _sessions[sid]
+                for key in [key for key in _state_build_lock_registry if key[0] == sid]:
+                    del _state_build_lock_registry[key]
                 print(f"[session] 清理最旧数据源 session: {sid}")
                 break
 
@@ -162,6 +170,7 @@ def _clear_state_caches() -> int:
         if state_cache:
             cleared += len(state_cache)
             state_cache.clear()
+    _state_build_lock_registry.clear()
     return cleared
 
 
@@ -205,19 +214,31 @@ def _get_state(index: int, session_id: str | None = None):
         state_cache.move_to_end(index)
         return state_cache[index]
 
-    t0 = time.time()
-    print(f"[cache] session={session['id']} 开始加载轨迹 {index}")
-    state = adapter.build_state(index)
-    t1 = time.time()
-    print(f"[cache] session={session['id']} 轨迹状态构建完成 {index}，耗时 {t1 - t0:.2f}s")
+    key = (session["id"], index)
+    with _state_build_lock_registry_lock:
+        lock = _state_build_lock_registry.get(key)
+        if lock is None:
+            lock = Lock()
+            _state_build_lock_registry[key] = lock
 
-    state_cache[index] = state
-    if len(state_cache) > _MAX_CACHE_SIZE:
-        oldest = next(iter(state_cache))
-        del state_cache[oldest]
-        print(f"[cache] session={session['id']} 清理轨迹 {oldest}，当前缓存: {len(state_cache)}")
+    with lock:
+        if index in state_cache:
+            state_cache.move_to_end(index)
+            return state_cache[index]
 
-    return state
+        t0 = time.time()
+        print(f"[cache] session={session['id']} 开始加载轨迹 {index}")
+        state = adapter.build_state(index)
+        t1 = time.time()
+        print(f"[cache] session={session['id']} 轨迹状态构建完成 {index}，耗时 {t1 - t0:.2f}s")
+
+        state_cache[index] = state
+        if len(state_cache) > _MAX_CACHE_SIZE:
+            oldest = next(iter(state_cache))
+            del state_cache[oldest]
+            print(f"[cache] session={session['id']} 清理轨迹 {oldest}，当前缓存: {len(state_cache)}")
+
+        return state
 
 
 def _get_browser_roots() -> list[Path]:

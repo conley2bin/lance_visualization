@@ -9,7 +9,7 @@ from .cma import get_cma_frame_data
 from .curves import get_curve_data, get_curve_options
 from .data_loader import OptimizedLanceLoader
 from .video import decode_video_frame, frame_to_base64
-from .visualization import TrajectoryState, get_frame_data
+from .visualization import TrajectoryState, get_frame_data, object_has_mesh, object_mesh_data
 
 
 class LanceViewerAdapter(ViewerAdapter):
@@ -27,7 +27,10 @@ class LanceViewerAdapter(ViewerAdapter):
 
     def list_items(self) -> list[TrajectoryListItem]:
         options = self.loader.create_trajectory_options()
-        return [{"label": label, "index": idx, "uuid": uuid} for label, idx, uuid in options]
+        return [
+            {"label": label, "index": idx, "uuid": uuid, "motion_interval": motion_interval}
+            for label, idx, uuid, motion_interval in options
+        ]
 
     def get_trajectory_list_progress(self) -> TrajectoryListProgress:
         return self.loader.get_trajectory_options_progress()
@@ -57,19 +60,18 @@ class LanceViewerAdapter(ViewerAdapter):
 
     def get_load_payload(self, index: int, state: TrajectoryState) -> LoadPayload:
         info = self.get_item_info(index)
-        video_info = self.loader.get_video_blobs(index)
         return {
             **info,
             "total_frames": state.T,
-            "num_cameras": video_info["num_cameras"],
+            "num_cameras": int(info.get("num_cameras", 0) or 0),
             "num_hands": len(state.hands),
             "hand_names": state.hand_names,
             "has_urdf": any(h["urdf_helper"] is not None for h in state.hands),
             "object_names": [obj["name"] for obj in state.objects],
             "missing_object_meshes": [
-                obj["name"] for obj in state.objects if obj["mesh"] is None
+                obj["name"] for obj in state.objects if not object_has_mesh(obj)
             ],
-            "has_object_mesh": any(obj["mesh"] is not None for obj in state.objects),
+            "has_object_mesh": any(object_has_mesh(obj) for obj in state.objects),
             "curve_options": self.get_curve_options(state),
         }
 
@@ -101,7 +103,7 @@ class LanceViewerAdapter(ViewerAdapter):
     def get_object_mesh_payload(self, state: TrajectoryState) -> ObjectMeshPayload | None:
         meshes: list[ObjectMeshPayload] = []
         for obj in state.objects:
-            mesh = obj["mesh"]
+            mesh = object_mesh_data(obj)
             if mesh is None:
                 continue
             meshes.append({

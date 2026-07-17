@@ -10,21 +10,39 @@ def _sort_text(value: str | None) -> str:
     return str(value or "").casefold()
 
 
-def _display_scene(index_data: dict | None, meta: dict | None) -> str:
-    object_names = meta.get("object_names") if meta else None
-    if isinstance(object_names, list) and object_names:
-        return str(object_names[0] or "?")
+def _display_scene(index_data: dict | None) -> str:
     return str(index_data.get("scene", "?")) if index_data else "?"
 
 
+def _motion_interval_text(object_moves) -> str:
+    if not object_moves:
+        return ""
+    intervals = []
+    for move in object_moves:
+        if not isinstance(move, dict):
+            continue
+        start = move.get("start_frame")
+        end = move.get("end_frame")
+        if start is None or end is None:
+            continue
+        intervals.append(f"{start}-{end}")
+    return "; ".join(intervals)
+
+
+def _num_cameras_from_capture_info(capture_info) -> int:
+    if not isinstance(capture_info, dict):
+        return 0
+    return sum(1 for key, value in capture_info.items() if str(key).startswith("camera") and value is not None)
+
+
 def _trajectory_label(index: int, index_data: dict | None, meta: dict | None) -> str:
-    scene = _display_scene(index_data, meta)
+    scene = _display_scene(index_data)
     operator = normalize_operator_name(index_data.get("operator", "?")) if index_data else "?"
     gesture = index_data.get("gesture", "") if index_data else ""
     frames = meta.get("total_frames", 0) if meta else 0
     frame_text = f"{frames}帧" if frames > 0 else "不可用"
     if gesture:
-        return f"{index:03d}: {scene} ({operator}) / {gesture}- {frame_text}"
+        return f"{index:03d}: {scene} ({operator}) / {gesture} - {frame_text}"
     return f"{index:03d}: {scene} ({operator}) - {frame_text}"
 
 
@@ -41,7 +59,7 @@ class OptimizedLanceLoader:
         self._metadata_cache: dict = {}
         self._video_cache: OrderedDict = OrderedDict()
         self._max_video_cache = 3  # 最多缓存3个轨迹的视频
-        self._trajectory_options_cache: list[tuple[str, int, str]] | None = None
+        self._trajectory_options_cache: list[tuple[str, int, str, str]] | None = None
         self._trajectory_progress_lock = RLock()
         self._trajectory_options_progress: dict = {
             "status": "idle",
@@ -64,10 +82,12 @@ class OptimizedLanceLoader:
                 meta = row["trajectory_metadata"][0].as_py()
                 self._metadata_cache[index] = {
                     "scene": index_data["scene"],
-                    "display_scene": _display_scene(index_data, meta),
+                    "display_scene": _display_scene(index_data),
                     "gesture": index_data.get("gesture", ""),
                     "operator": normalize_operator_name(index_data.get("operator", "N/A")),
                     "frames": meta["total_frames"],
+                    "num_cameras": _num_cameras_from_capture_info(meta.get("capture_info")),
+                    "motion_interval": _motion_interval_text((meta or {}).get("trajectory_info", {}).get("object_move")),
                     "label": _trajectory_label(index, index_data, meta),
                     "uuid": (index_data.get("uuid") or "")[:16],
                     "capMachine": index_data.get("capMachine", "unknown"),
@@ -80,6 +100,8 @@ class OptimizedLanceLoader:
                     "gesture": "",
                     "operator": "N/A",
                     "frames": 0,
+                    "num_cameras": 0,
+                    "motion_interval": "",
                     "label": f"{index:03d}: 不可用",
                     "uuid": "unknown",
                     "capMachine": "unknown",
@@ -142,8 +164,8 @@ class OptimizedLanceLoader:
         progress["cached"] = self._trajectory_options_cache is not None
         return progress
 
-    def create_trajectory_options(self) -> list[tuple[str, int, str]]:
-        """批量读取所有轨迹 metadata，返回 (label, index, uuid) 列表。"""
+    def create_trajectory_options(self) -> list[tuple[str, int, str, str]]:
+        """批量读取所有轨迹 metadata，返回 (label, index, uuid, motion_interval) 列表。"""
         if self._trajectory_options_cache is not None:
             self._set_trajectory_options_progress(
                 status="ready",
@@ -166,58 +188,52 @@ class OptimizedLanceLoader:
 
         try:
             options = []
-            row_index = 0
+            loaded_rows = 0
             last_reported = 0
             operator_cache: dict[str, str] = {}
             batches = self.dataset.to_batches(
                 columns=[
                     "index.scene",
                     "index.operator",
-                    "index.gesture",
                     "index.uuid",
                     "trajectory_metadata.total_frames",
-                    "trajectory_metadata.object_names",
+                    "trajectory_metadata.trajectory_info.object_move",
                 ],
                 batch_size=4096,
+                with_row_id=True,
                 scan_in_order=False,
             )
             for batch in batches:
                 scene_list = batch["index.scene"].to_pylist()
                 operator_list = batch["index.operator"].to_pylist()
-                gesture_list = batch["index.gesture"].to_pylist()
                 uuid_list = batch["index.uuid"].to_pylist()
                 total_frames_list = batch["trajectory_metadata.total_frames"].to_pylist()
-                object_names_list = batch["trajectory_metadata.object_names"].to_pylist()
+                object_move_list = batch["trajectory_metadata.trajectory_info.object_move"].to_pylist()
+                row_ids = batch["_rowid"].to_pylist()
 
                 for batch_offset, scene_raw in enumerate(scene_list):
-                    i = row_index
-                    object_names = object_names_list[batch_offset] or []
-                    if object_names:
-                        scene = str(object_names[0] or "?")
-                    else:
-                        scene = str(scene_raw or "?")
+                    # Lance 的 _rowid 低位是片内偏移，这里右移 32 位得到逻辑行号。
+                    i = int(row_ids[batch_offset]) >> 32
+                    scene = str(scene_raw or "?")
 
                     operator_raw = operator_list[batch_offset] or "?"
                     operator = operator_cache.get(operator_raw)
                     if operator is None:
                         operator = normalize_operator_name(operator_raw)
                         operator_cache[operator_raw] = operator
-                    gesture = gesture_list[batch_offset] or ""
                     frames = total_frames_list[batch_offset] or 0
                     frame_text = f"{frames}帧" if frames > 0 else "不可用"
-                    if gesture:
-                        label = f"{i:03d}: {scene} ({operator}) / {gesture}- {frame_text}"
-                    else:
-                        label = f"{i:03d}: {scene} ({operator}) - {frame_text}"
+                    motion_interval = _motion_interval_text(object_move_list[batch_offset])
+                    label = f"{i:03d}: {scene} ({operator}) - {frame_text}"
                     uuid = uuid_list[batch_offset] or ""
-                    options.append((label, i, uuid, _sort_text(scene), _sort_text(gesture)))
-                    row_index += 1
+                    options.append((label, i, uuid, motion_interval, _sort_text(scene), ""))
+                    loaded_rows += 1
 
-                if row_index - last_reported >= 100 or row_index >= self.total_rows:
-                    last_reported = row_index
+                if loaded_rows - last_reported >= 100 or loaded_rows >= self.total_rows:
+                    last_reported = loaded_rows
                     self._set_trajectory_options_progress(
                         status="loading",
-                        loaded=row_index,
+                        loaded=loaded_rows,
                         total=self.total_rows,
                         message="正在扫描 Lance metadata",
                     )
@@ -228,8 +244,9 @@ class OptimizedLanceLoader:
                 total=self.total_rows,
                 message="正在整理轨迹列表",
             )
-            options.sort(key=lambda item: (item[3], item[4], item[1]))
-            result = [(label, index, uuid) for label, index, uuid, _, _ in options]
+            # 列表顺序以场景名优先，保持和之前一致的浏览习惯。
+            options.sort(key=lambda item: (item[4], item[1]))
+            result = [(label, index, uuid, motion_interval) for label, index, uuid, motion_interval, _, _ in options]
             self._trajectory_options_cache = result
             self._set_trajectory_options_progress(
                 status="ready",
