@@ -32,6 +32,12 @@ def _normalize_hand_name(name: str | None, fallback: str) -> str:
     return value or fallback_value or "right"
 
 
+def _scene_object_name(index_data: dict | None) -> str:
+    if not index_data:
+        return ""
+    return str(index_data.get("scene") or "").strip()
+
+
 def _resolve_mano_model_path(mano_model_path: str, hand: str, project_root: Path) -> str:
     side = "LEFT" if hand == "left" else "RIGHT"
     requested = Path(mano_model_path) if mano_model_path else None
@@ -172,7 +178,6 @@ class TrajectoryState:
         self.payload_lock = RLock()
         index_data = dict(lance_row.get("index") or {})
         meta = dict(lance_row.get("trajectory_metadata") or {})
-        object_names = _as_list(meta.get("object_names"))
 
         self.index_data = {
             "scene": index_data.get("scene", ""),
@@ -242,9 +247,11 @@ class TrajectoryState:
         self.urdf_dof = first_hand["urdf_dof"]
         self.urdf_helper: URDFHelper | None = first_hand["urdf_helper"]
 
-        object_names = _as_list(meta.get("object_names"))
+        scene_object_name = _scene_object_name(self.index_data)
+        object_names: list[str] = []
         for idx, object_row in enumerate(_as_list(lance_row.get("objects"))):
-            object_name = str(object_names[idx] if idx < len(object_names) else f"object_{idx}")
+            object_name = scene_object_name if idx == 0 and scene_object_name else f"object_{idx}"
+            object_names.append(object_name)
             self.objects.append({
                 "name": object_name,
                 "pos": np.array(object_row["pos"], dtype=np.float32),
