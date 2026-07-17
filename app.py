@@ -53,12 +53,13 @@ def index():
 
 _config: dict = {}
 _project_root: Path = Path("/data")
-_MAX_CACHE_SIZE = int(os.environ.get("VIZ_STATE_CACHE_SIZE", "4"))
+_MAX_CACHE_SIZE = int(os.environ.get("VIZ_STATE_CACHE_SIZE", "16"))
 _DEFAULT_SESSION_ID = "default"
 _MAX_SESSION_COUNT = int(os.environ.get("DATASET_SESSION_LIMIT", "8"))
 _SESSION_TTL_SECONDS = int(os.environ.get("DATASET_SESSION_TTL_SECONDS", "1800"))
 _sessions: OrderedDict[str, dict] = OrderedDict()
-_state_build_lock_registry: dict[tuple[str, int], Lock] = {}
+_state_cache: OrderedDict[tuple, object] = OrderedDict()
+_state_build_lock_registry: dict[tuple, Lock] = {}
 _state_build_lock_registry_lock = Lock()
 _assets_version: str | None = None
 
@@ -102,8 +103,6 @@ def _create_session(config: dict, session_id: str | None = None) -> dict:
         "id": session_id,
         "config": session_config,
         "adapter": adapter,
-        "state_cache": OrderedDict(),
-        "state_build_locks": {},
         "last_access": time.time(),
     }
     _sessions[session_id] = session
@@ -120,16 +119,12 @@ def _cleanup_sessions() -> None:
     ]
     for sid in expired:
         del _sessions[sid]
-        for key in [key for key in _state_build_lock_registry if key[0] == sid]:
-            del _state_build_lock_registry[key]
         print(f"[session] 清理过期数据源 session: {sid}")
 
     while len([sid for sid in _sessions if sid != _DEFAULT_SESSION_ID]) > _MAX_SESSION_COUNT:
         for sid in list(_sessions.keys()):
             if sid != _DEFAULT_SESSION_ID:
                 del _sessions[sid]
-                for key in [key for key in _state_build_lock_registry if key[0] == sid]:
-                    del _state_build_lock_registry[key]
                 print(f"[session] 清理最旧数据源 session: {sid}")
                 break
 
@@ -164,14 +159,11 @@ def _read_assets_version() -> str:
 
 
 def _clear_state_caches() -> int:
-    cleared = 0
-    for session in _sessions.values():
-        state_cache = session.get("state_cache")
-        if state_cache:
-            cleared += len(state_cache)
-            state_cache.clear()
-    _state_build_lock_registry.clear()
-    return cleared
+    with _state_build_lock_registry_lock:
+        cleared = len(_state_cache)
+        _state_cache.clear()
+        _state_build_lock_registry.clear()
+        return cleared
 
 
 def _ensure_assets_version_current() -> tuple[str, bool]:
@@ -203,28 +195,42 @@ def _get_session(session_id: str | None = None) -> dict:
     return session
 
 
+def _state_cache_key(session: dict, index: int) -> tuple:
+    config = session["config"]
+    paths = config.get("paths", {})
+    defaults = config.get("defaults", {})
+    return (
+        config.get("viewer", {}).get("type", "lance"),
+        paths.get("lance_dataset", ""),
+        paths.get("mano_model", ""),
+        defaults.get("hand", "right"),
+        str(_project_root),
+        _assets_version or "",
+        int(index),
+    )
+
+
 def _get_state(index: int, session_id: str | None = None):
     """获取（或构建）指定轨迹状态，带LRU缓存。"""
     _ensure_assets_version_current()
     session = _get_session(session_id)
     adapter: ViewerAdapter = session["adapter"]
-    state_cache: OrderedDict[int, object] = session["state_cache"]
+    key = _state_cache_key(session, index)
 
-    if index in state_cache:
-        state_cache.move_to_end(index)
-        return state_cache[index]
-
-    key = (session["id"], index)
     with _state_build_lock_registry_lock:
+        if key in _state_cache:
+            _state_cache.move_to_end(key)
+            return _state_cache[key]
         lock = _state_build_lock_registry.get(key)
         if lock is None:
             lock = Lock()
             _state_build_lock_registry[key] = lock
 
     with lock:
-        if index in state_cache:
-            state_cache.move_to_end(index)
-            return state_cache[index]
+        with _state_build_lock_registry_lock:
+            if key in _state_cache:
+                _state_cache.move_to_end(key)
+                return _state_cache[key]
 
         t0 = time.time()
         print(f"[cache] session={session['id']} 开始加载轨迹 {index}")
@@ -232,11 +238,14 @@ def _get_state(index: int, session_id: str | None = None):
         t1 = time.time()
         print(f"[cache] session={session['id']} 轨迹状态构建完成 {index}，耗时 {t1 - t0:.2f}s")
 
-        state_cache[index] = state
-        if len(state_cache) > _MAX_CACHE_SIZE:
-            oldest = next(iter(state_cache))
-            del state_cache[oldest]
-            print(f"[cache] session={session['id']} 清理轨迹 {oldest}，当前缓存: {len(state_cache)}")
+        with _state_build_lock_registry_lock:
+            _state_cache[key] = state
+            _state_cache.move_to_end(key)
+            if len(_state_cache) > _MAX_CACHE_SIZE:
+                oldest = next(iter(_state_cache))
+                del _state_cache[oldest]
+                _state_build_lock_registry.pop(oldest, None)
+                print(f"[cache] 清理共享轨迹缓存 index={oldest[-1]}，当前缓存: {len(_state_cache)}")
 
         return state
 

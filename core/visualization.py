@@ -6,6 +6,7 @@
 """
 from functools import lru_cache
 from pathlib import Path
+from threading import RLock
 
 import numpy as np
 import trimesh
@@ -168,6 +169,7 @@ class TrajectoryState:
         hand: str,
         project_root: Path,
     ):
+        self.payload_lock = RLock()
         index_data = dict(lance_row.get("index") or {})
         meta = dict(lance_row.get("trajectory_metadata") or {})
         object_names = _as_list(meta.get("object_names"))

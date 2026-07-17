@@ -1,6 +1,6 @@
 import lance
 from collections import OrderedDict
-from threading import RLock
+from threading import Condition, RLock
 import time
 
 from .operator_identity import normalize_operator_name
@@ -50,28 +50,56 @@ def _trajectory_uuid(index_data: dict | None) -> str:
     return str(index_data.get("uuid") or "") if index_data else ""
 
 
+def _initial_trajectory_progress(total: int) -> dict:
+    return {
+        "status": "idle",
+        "loaded": 0,
+        "total": total,
+        "percent": 0.0,
+        "message": "轨迹列表未加载",
+        "cached": False,
+        "started_at": None,
+        "updated_at": time.time(),
+        "finished_at": None,
+    }
+
+
+class _TrajectoryOptionsEntry:
+    def __init__(self, total_rows: int):
+        self.lock = RLock()
+        self.ready = Condition(self.lock)
+        self.loading = False
+        self.options: list[tuple[str, int, str, str]] | None = None
+        self.progress = _initial_trajectory_progress(total_rows)
+
+
+_trajectory_options_entries: dict[str, _TrajectoryOptionsEntry] = {}
+_trajectory_options_entries_lock = RLock()
+
+
+def _get_trajectory_options_entry(lance_path: str, total_rows: int) -> _TrajectoryOptionsEntry:
+    with _trajectory_options_entries_lock:
+        entry = _trajectory_options_entries.get(lance_path)
+        if entry is None:
+            entry = _TrajectoryOptionsEntry(total_rows)
+            _trajectory_options_entries[lance_path] = entry
+        else:
+            with entry.lock:
+                entry.progress["total"] = total_rows
+        return entry
+
+
 class OptimizedLanceLoader:
     """优化的 Lance 数据加载器，使用缓存和列选择。"""
 
     def __init__(self, lance_path: str):
+        self.lance_path = str(lance_path)
         self.dataset = lance.dataset(lance_path)
         self.total_rows = self.dataset.count_rows()
         self._metadata_cache: dict = {}
         self._video_cache: OrderedDict = OrderedDict()
         self._max_video_cache = 3  # 最多缓存3个轨迹的视频
-        self._trajectory_options_cache: list[tuple[str, int, str, str]] | None = None
-        self._trajectory_progress_lock = RLock()
-        self._trajectory_options_progress: dict = {
-            "status": "idle",
-            "loaded": 0,
-            "total": self.total_rows,
-            "percent": 0.0,
-            "message": "轨迹列表未加载",
-            "cached": False,
-            "started_at": None,
-            "updated_at": time.time(),
-            "finished_at": None,
-        }
+        self._trajectory_options_entry = _get_trajectory_options_entry(self.lance_path, self.total_rows)
 
     def get_trajectory_info(self, index: int) -> dict:
         """获取指定轨迹的轻量信息（只加载 index + trajectory_metadata 列）。"""
@@ -149,32 +177,55 @@ class OptimizedLanceLoader:
         total = int(updates.get("total", self.total_rows) or 0)
         loaded = int(updates.get("loaded", 0) or 0)
         percent = (loaded / total * 100.0) if total else 0.0
-        with self._trajectory_progress_lock:
-            self._trajectory_options_progress.update(updates)
-            self._trajectory_options_progress["total"] = total
-            self._trajectory_options_progress["loaded"] = loaded
-            self._trajectory_options_progress["percent"] = round(max(0.0, min(100.0, percent)), 1)
-            self._trajectory_options_progress["cached"] = self._trajectory_options_cache is not None
-            self._trajectory_options_progress["updated_at"] = time.time()
+        entry = self._trajectory_options_entry
+        with entry.lock:
+            entry.progress.update(updates)
+            entry.progress["total"] = total
+            entry.progress["loaded"] = loaded
+            entry.progress["percent"] = round(max(0.0, min(100.0, percent)), 1)
+            entry.progress["cached"] = entry.options is not None
+            entry.progress["updated_at"] = time.time()
+            entry.ready.notify_all()
 
     def get_trajectory_options_progress(self) -> dict:
         """返回轨迹列表构建进度，供前端显示完整列表加载状态。"""
-        with self._trajectory_progress_lock:
-            progress = dict(self._trajectory_options_progress)
-        progress["cached"] = self._trajectory_options_cache is not None
-        return progress
+        entry = self._trajectory_options_entry
+        with entry.lock:
+            progress = dict(entry.progress)
+            progress["cached"] = entry.options is not None
+            return progress
 
     def create_trajectory_options(self) -> list[tuple[str, int, str, str]]:
         """批量读取所有轨迹 metadata，返回 (label, index, uuid, motion_interval) 列表。"""
-        if self._trajectory_options_cache is not None:
+        entry = self._trajectory_options_entry
+        with entry.lock:
+            cached_options = entry.options
+            if cached_options is not None:
+                result = cached_options
+            else:
+                result = None
+
+        if result is not None:
             self._set_trajectory_options_progress(
                 status="ready",
-                loaded=len(self._trajectory_options_cache),
+                loaded=len(result),
                 total=self.total_rows,
                 message="轨迹列表已加载",
                 finished_at=time.time(),
             )
-            return list(self._trajectory_options_cache)
+            return result
+
+        with entry.lock:
+            while entry.loading:
+                entry.ready.wait(timeout=1.0)
+                if entry.options is not None:
+                    result = entry.options
+                    break
+            else:
+                result = None
+            if result is not None:
+                return result
+            entry.loading = True
 
         started_at = time.time()
         self._set_trajectory_options_progress(
@@ -247,7 +298,10 @@ class OptimizedLanceLoader:
             # 列表顺序以场景名优先，保持和之前一致的浏览习惯。
             options.sort(key=lambda item: (item[4], item[1]))
             result = [(label, index, uuid, motion_interval) for label, index, uuid, motion_interval, _, _ in options]
-            self._trajectory_options_cache = result
+            with entry.lock:
+                entry.options = result
+                entry.loading = False
+                entry.ready.notify_all()
             self._set_trajectory_options_progress(
                 status="ready",
                 loaded=len(result),
@@ -255,7 +309,7 @@ class OptimizedLanceLoader:
                 message="轨迹列表已加载",
                 finished_at=time.time(),
             )
-            return list(result)
+            return result
         except Exception as exc:
             self._set_trajectory_options_progress(
                 status="error",
@@ -264,4 +318,7 @@ class OptimizedLanceLoader:
                 message=f"轨迹列表加载失败: {exc}",
                 finished_at=time.time(),
             )
+            with entry.lock:
+                entry.loading = False
+                entry.ready.notify_all()
             raise

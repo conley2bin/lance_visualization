@@ -87,16 +87,30 @@ class LanceViewerAdapter(ViewerAdapter):
         show_object: bool = True,
         show_origin: bool = False,
     ) -> FramePayload:
-        frame = get_frame_data(
-            state=state,
-            frame_idx=frame_idx,
-            show_mano_mesh=show_mano_mesh,
-            show_mano_joints=show_mano_joints,
-            show_urdf_joints=show_urdf_joints,
-            show_urdf_mesh=show_urdf_mesh,
-            show_object=show_object,
-            show_origin=show_origin,
-        )
+        lock = getattr(state, "payload_lock", None)
+        if lock is not None:
+            with lock:
+                frame = get_frame_data(
+                    state=state,
+                    frame_idx=frame_idx,
+                    show_mano_mesh=show_mano_mesh,
+                    show_mano_joints=show_mano_joints,
+                    show_urdf_joints=show_urdf_joints,
+                    show_urdf_mesh=show_urdf_mesh,
+                    show_object=show_object,
+                    show_origin=show_origin,
+                )
+        else:
+            frame = get_frame_data(
+                state=state,
+                frame_idx=frame_idx,
+                show_mano_mesh=show_mano_mesh,
+                show_mano_joints=show_mano_joints,
+                show_urdf_joints=show_urdf_joints,
+                show_urdf_mesh=show_urdf_mesh,
+                show_object=show_object,
+                show_origin=show_origin,
+            )
         frame["title"] = frame.get("scene", "")
         return frame
 
