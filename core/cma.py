@@ -33,6 +33,14 @@ def _as_sequence(value: Any) -> list:
     return []
 
 
+def _scene_object_names(lance_row: dict[str, Any]) -> set[str]:
+    index_data = lance_row.get("index") or {}
+    scene = str(index_data.get("scene") or "").strip()
+    if not scene:
+        return set()
+    return {name.strip() for name in scene.replace("，", ",").split(",") if name.strip()}
+
+
 def _finite_xyz(value: Any) -> list[float] | None:
     coords = _as_sequence(value)
     if len(coords) < 3:
@@ -255,7 +263,6 @@ def get_cma_frame_data(lance_row: dict[str, Any], frame_idx: int) -> dict[str, A
     cma_data = lance_row.get("cma_data")
     if not isinstance(cma_data, dict):
         return _unavailable()
-    meta = lance_row.get("trajectory_metadata") or {}
 
     human_frames = _as_sequence(cma_data.get("human_marker_frames"))
     body_frames = _as_sequence(cma_data.get("body_frames"))
@@ -299,7 +306,7 @@ def get_cma_frame_data(lance_row: dict[str, Any], frame_idx: int) -> dict[str, A
     human_hands = _human_hands_payload(marker_names, marker_positions)
     body_markers = _points_payload(body_names, body_positions)
     object_pose = None
-    object_names = {str(name) for name in _as_sequence(meta.get("object_names"))}
+    object_names = _scene_object_names(lance_row)
     ordered_bodies = sorted(
         bodies,
         key=lambda body: 0 if body["name"] in object_names else 1,

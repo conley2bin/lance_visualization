@@ -38,6 +38,19 @@ def _scene_object_name(index_data: dict | None) -> str:
     return str(index_data.get("scene") or "").strip()
 
 
+def _scene_object_names(index_data: dict | None) -> list[str]:
+    scene = _scene_object_name(index_data)
+    if not scene:
+        return []
+    return [name.strip() for name in scene.replace("，", ",").split(",") if name.strip()]
+
+
+def _object_name_for_index(idx: int, object_names: list[str]) -> str:
+    if idx < len(object_names):
+        return object_names[idx]
+    return f"object_{idx}"
+
+
 def _resolve_mano_model_path(mano_model_path: str, hand: str, project_root: Path) -> str:
     side = "LEFT" if hand == "left" else "RIGHT"
     requested = Path(mano_model_path) if mano_model_path else None
@@ -73,28 +86,19 @@ def _resolve_urdf_path(project_root: Path, operator: str, hand: str) -> Path | N
 @lru_cache(maxsize=128)
 def _load_object_mesh_cached(project_root: str, object_name: str) -> dict | None:
     project_root_path = Path(project_root)
-    objects_dir = project_root_path / "assets/objects"
-    if not object_name or not objects_dir.exists():
-        return None
-
-    # 用 assets/objects 中的目录名做前缀匹配，兼容 cuboid2H → cuboid2 等变体
-    known = sorted([d.name for d in objects_dir.iterdir() if d.is_dir()], key=len, reverse=True)
-    matched = next((n for n in known if object_name.startswith(n)), None) or object_name
-    obj_paths = [
-        objects_dir / matched / f"{matched}_aligned.stl",
-        objects_dir / f"{matched}_aligned.stl",
-    ]
-    for obj_path in obj_paths:
-        if obj_path.exists():
-            try:
-                mesh = trimesh.load(str(obj_path))
-                mesh.vertices = mesh.vertices * 0.001  # mm → m
-                return {
-                    "vertices": np.asarray(mesh.vertices, dtype=np.float32),
-                    "faces": np.asarray(mesh.faces, dtype=np.int32),
-                }
-            except Exception:
-                pass
+    _, candidates = _object_mesh_candidates(project_root_path, object_name)
+    for obj_path in candidates:
+        if not obj_path.exists():
+            continue
+        try:
+            mesh = trimesh.load(str(obj_path))
+            mesh.vertices = mesh.vertices * 0.001  # mm -> m
+            return {
+                "vertices": np.asarray(mesh.vertices, dtype=np.float32),
+                "faces": np.asarray(mesh.faces, dtype=np.int32),
+            }
+        except Exception:
+            continue
     return None
 
 
@@ -247,10 +251,10 @@ class TrajectoryState:
         self.urdf_dof = first_hand["urdf_dof"]
         self.urdf_helper: URDFHelper | None = first_hand["urdf_helper"]
 
-        scene_object_name = _scene_object_name(self.index_data)
+        scene_object_names = _scene_object_names(self.index_data)
         object_names: list[str] = []
         for idx, object_row in enumerate(_as_list(lance_row.get("objects"))):
-            object_name = scene_object_name if idx == 0 and scene_object_name else f"object_{idx}"
+            object_name = _object_name_for_index(idx, scene_object_names)
             object_names.append(object_name)
             self.objects.append({
                 "name": object_name,
