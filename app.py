@@ -111,6 +111,12 @@ def _create_session(config: dict, session_id: str | None = None) -> dict:
     return session
 
 
+def _session_dataset_fingerprint(session: dict) -> str:
+    adapter = session.get("adapter")
+    loader = getattr(adapter, "loader", None)
+    return str(getattr(loader, "dataset_fingerprint", ""))
+
+
 def _cleanup_sessions() -> None:
     now = time.time()
     expired = [
@@ -202,6 +208,7 @@ def _state_cache_key(session: dict, index: int) -> tuple:
     return (
         config.get("viewer", {}).get("type", "lance"),
         paths.get("lance_dataset", ""),
+        _session_dataset_fingerprint(session),
         paths.get("mano_model", ""),
         defaults.get("hand", "right"),
         str(_project_root),
@@ -320,6 +327,7 @@ def _make_dataset_response(session: dict) -> dict:
     return {
         "session_id": session["id"],
         "lance_path": config.get("paths", {}).get("lance_dataset", ""),
+        "dataset_fingerprint": _session_dataset_fingerprint(session),
         "total_items": adapter.total_items,
         "default_trajectory_index": config.get("defaults", {}).get("trajectory_index", 0),
         "viewer_type": config.get("viewer", {}).get("type", "lance"),

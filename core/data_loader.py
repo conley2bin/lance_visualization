@@ -73,20 +73,48 @@ class _TrajectoryOptionsEntry:
         self.progress = _initial_trajectory_progress(total_rows)
 
 
-_trajectory_options_entries: dict[str, _TrajectoryOptionsEntry] = {}
+_trajectory_options_entries: dict[tuple[str, str], _TrajectoryOptionsEntry] = {}
 _trajectory_options_entries_lock = RLock()
 
 
-def _get_trajectory_options_entry(lance_path: str, total_rows: int) -> _TrajectoryOptionsEntry:
+def _get_trajectory_options_entry(lance_path: str, dataset_fingerprint: str, total_rows: int) -> _TrajectoryOptionsEntry:
+    key = (lance_path, dataset_fingerprint)
     with _trajectory_options_entries_lock:
-        entry = _trajectory_options_entries.get(lance_path)
+        entry = _trajectory_options_entries.get(key)
         if entry is None:
+            for stale_key in [stale for stale in _trajectory_options_entries if stale[0] == lance_path]:
+                del _trajectory_options_entries[stale_key]
             entry = _TrajectoryOptionsEntry(total_rows)
-            _trajectory_options_entries[lance_path] = entry
+            _trajectory_options_entries[key] = entry
         else:
             with entry.lock:
                 entry.progress["total"] = total_rows
         return entry
+
+
+def _dataset_fingerprint(dataset, total_rows: int) -> str:
+    try:
+        version = dataset.version
+    except Exception:
+        version = "unknown"
+
+    metadata = {}
+    try:
+        versions = dataset.versions()
+        if versions:
+            metadata = dict(versions[-1].get("metadata") or {})
+    except Exception:
+        pass
+
+    fields = [
+        str(version),
+        str(total_rows),
+        str(metadata.get("total_rows", "")),
+        str(metadata.get("total_fragments", "")),
+        str(metadata.get("total_data_files", "")),
+        str(metadata.get("total_files_size", "")),
+    ]
+    return ":".join(fields)
 
 
 class OptimizedLanceLoader:
@@ -96,10 +124,15 @@ class OptimizedLanceLoader:
         self.lance_path = str(lance_path)
         self.dataset = lance.dataset(lance_path)
         self.total_rows = self.dataset.count_rows()
+        self.dataset_fingerprint = _dataset_fingerprint(self.dataset, self.total_rows)
         self._metadata_cache: dict = {}
         self._video_cache: OrderedDict = OrderedDict()
         self._max_video_cache = 3  # 最多缓存3个轨迹的视频
-        self._trajectory_options_entry = _get_trajectory_options_entry(self.lance_path, self.total_rows)
+        self._trajectory_options_entry = _get_trajectory_options_entry(
+            self.lance_path,
+            self.dataset_fingerprint,
+            self.total_rows,
+        )
 
     def get_trajectory_info(self, index: int) -> dict:
         """获取指定轨迹的轻量信息（只加载 index + trajectory_metadata 列）。"""
