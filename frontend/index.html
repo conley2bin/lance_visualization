@@ -1620,56 +1620,70 @@ async function refreshFrame() {
     return r.json();
   });
 
+  const framePromise = (async () => {
+    if (S.trajIndex === null) return null;
+    const p = new URLSearchParams({
+      show_mano_mesh:   $('cb-mano-mesh').checked,
+      show_mano_joints: $('cb-mano-joints').checked,
+      show_urdf_joints: $('cb-urdf-joints').checked,
+      show_urdf_mesh:   $('cb-urdf-mesh').checked,
+      show_object:      $('cb-object').checked,
+      show_origin:      false,
+    });
+    return fetchWithSig(withSession(`./api/frame/${S.trajIndex}/${S.frameIdx}?${p}`))
+      .catch(() => null);
+  })();
+  const videoPromise = (async () => {
+    if (S.trajIndex === null || S.numCameras === 0) return null;
+    return fetchWithSig(withSession(`./api/video/${S.trajIndex}/${$('cam-select').value || 0}/${S.frameIdx}?stream=${$('stream-select').value}`))
+      .catch(() => null);
+  })();
+  const cmaPromise = (async () => {
+    if (S.trajIndex === null) return null;
+    return fetchWithSig(withSession(`./api/cma/${S.trajIndex}/${S.frameIdx}`))
+      .catch(() => null);
+  })();
+
   try {
-    const [d3, dv, dcma] = await Promise.all([
-      (async () => {
-        const p = new URLSearchParams({
-          show_mano_mesh:   $('cb-mano-mesh').checked,
-          show_mano_joints: $('cb-mano-joints').checked,
-          show_urdf_joints: $('cb-urdf-joints').checked,
-          show_urdf_mesh:   $('cb-urdf-mesh').checked,
-          show_object:      $('cb-object').checked,
-          show_origin:      false,
-        });
-        return fetchWithSig(withSession(`./api/frame/${S.trajIndex}/${S.frameIdx}?${p}`))
-          .catch(() => null);
-      })(),
-      (async () => {
-        if (S.trajIndex === null || S.numCameras === 0) return null;
-        return fetchWithSig(withSession(`./api/video/${S.trajIndex}/${$('cam-select').value || 0}/${S.frameIdx}?stream=${$('stream-select').value}`))
-          .catch(() => null);
-      })(),
-      (async () => {
-        if (S.trajIndex === null) return null;
-        return fetchWithSig(withSession(`./api/cma/${S.trajIndex}/${S.frameIdx}`))
-          .catch(() => null);
-      })(),
-    ]);
+    const d3 = await framePromise;
 
     // 如果有更新的请求已经发出，丢弃本次结果
     if (seq !== _frameSeq) return;
 
     try {
       S.lastFrame3D = d3 || null;
-      S.lastCma = dcma || null;
       if (d3) apply3D(d3);
     } catch (e) {
       console.warn('3D view update failed', e);
     }
-    try {
-      applyCma(dcma);
-    } catch (e) {
+    void videoPromise.then(dv => {
+      if (seq !== _frameSeq) return;
+      if (dv) {
+        $('video-img').src = dv.data_uri;
+        $('video-img').style.display = 'block';
+        $('video-none').style.display = 'none';
+      } else if (S.numCameras > 0) {
+        $('video-img').style.display = 'none';
+        $('video-none').style.display = '';
+      }
+    }).catch(e => {
+      if (seq !== _frameSeq) return;
+      console.warn('video view update failed', e);
+    });
+    void cmaPromise.then(dcma => {
+      if (seq !== _frameSeq) return;
+      S.lastCma = dcma || null;
+      try {
+        applyCma(dcma);
+      } catch (e) {
+        console.warn('CMA view update failed', e);
+        setCmaUnavailable();
+      }
+    }).catch(e => {
+      if (seq !== _frameSeq) return;
       console.warn('CMA view update failed', e);
       setCmaUnavailable();
-    }
-    if (dv) {
-      $('video-img').src = dv.data_uri;
-      $('video-img').style.display = 'block';
-      $('video-none').style.display = 'none';
-    } else if (S.numCameras > 0) {
-      $('video-img').style.display = 'none';
-      $('video-none').style.display = '';
-    }
+    });
   } catch (e) {
     if (e.name === 'AbortError') return;  // 正常取消，忽略
     console.warn('frame refresh failed', e);
@@ -2136,13 +2150,12 @@ async function loadDatasetFromPath(path, options = {}) {
       : 0;
     const targetIndex = Number.isInteger(options.trajIndex) ? options.trajIndex : defaultIndex;
     const needsUuidResolve = !!options.trajUuid;
-    if (!needsUuidResolve) {
-      void fetchTrajectories({ updateSearch: false, clearOnEmpty: false });
-    }
     await loadTrajectory(targetIndex, { frame: options.frame });
     if (loadSeq !== _datasetLoadSeq) return;
     if (needsUuidResolve) {
       void fetchTrajectories({ updateSearch: false, clearOnEmpty: false, linkState: options });
+    } else {
+      void fetchTrajectories({ updateSearch: false, clearOnEmpty: false });
     }
   } catch (e) {
     hideLoading();
@@ -2354,7 +2367,11 @@ async function loadTrajectory(index, options = {}) {
     if (loadSeq !== _trajectoryLoadSeq) return;
     hideLoading();
 
-    const backgroundLabel = '物体、曲线';
+    const backgroundParts = [];
+    if (info.num_cameras > 0) backgroundParts.push('视频');
+    if (info.has_object_mesh) backgroundParts.push('物体');
+    backgroundParts.push('曲线');
+    const backgroundLabel = backgroundParts.join('、');
     clearStatusToasts();
     showStatusToast(`${backgroundLabel}正在加载中`);
 
@@ -2706,8 +2723,9 @@ $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ �
       await loadDatasetFromPath(linkState.lancePath, linkState);
       return;
     }
+    let current = null;
     try {
-      const current = await apiFetch(withSession('./api/dataset/current'));
+      current = await apiFetch(withSession('./api/dataset/current'));
       setDatasetSessionId(current.session_id || S.datasetSessionId);
       S.lancePath = current.lance_path || '';
     } catch {}
@@ -2719,11 +2737,11 @@ $('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ �
       $('source-path').dataset.selectedName = currentRecord?.dataset_name || currentRecord?.dataset_path || '';
       setTrajectoryList([], { clearOnEmpty: false });
       clearTrajectoryVisuals();
-      const defaultIndex = Number.isInteger(current.default_trajectory_index)
+      const defaultIndex = Number.isInteger(current?.default_trajectory_index)
         ? current.default_trajectory_index
         : 0;
-      void fetchTrajectories({ updateSearch: false, clearOnEmpty: false });
       await loadTrajectory(defaultIndex);
+      void fetchTrajectories({ updateSearch: false, clearOnEmpty: false });
     } else {
       clearSourceSelection();
       clearTrajectoryVisuals();
