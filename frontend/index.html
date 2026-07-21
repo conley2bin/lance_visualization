@@ -15,11 +15,18 @@ body {
 #topbar {
   background: #f8f9fa; border-bottom: 1px solid #dee2e6;
   padding: 7px 14px; display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+  min-width: 0;
 }
 #topbar h1 { font-size: 14px; color: #1890ff; white-space: nowrap; }
 #traj-select { flex: 1; max-width: 480px; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; }
-#traj-info { color: #7f8c8d; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#source-wrap { margin-left: auto; display: flex; align-items: center; gap: 5px; min-width: 340px; max-width: 520px; flex: 0 1 42%; }
+#traj-info {
+  color: #7f8c8d; font-size: 11px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; flex: 0 1 220px; min-width: 0; max-width: 260px;
+}
+#source-wrap {
+  margin-left: auto; display: flex; align-items: center; gap: 5px;
+  min-width: 240px; max-width: 520px; flex: 1 1 360px;
+}
 #source-picker-wrap { position: relative; min-width: 0; flex: 1; }
 #source-path { width: 100%; min-width: 0; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; font-size: 12px; outline: none; }
 #source-path:focus { border-color: #1890ff; }
@@ -64,8 +71,12 @@ body {
 }
 
 /* ── 轨迹搜索 ── */
-#traj-search-wrap { position: relative; flex: 1; max-width: 480px; }
-#traj-search { width: 100%; background: #ffffff; color: #2c3e50; border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px; outline: none; }
+#traj-search-wrap { position: relative; flex: 1 1 320px; min-width: 220px; max-width: 480px; }
+#traj-search {
+  width: 100%; min-width: 0; background: #ffffff; color: #2c3e50;
+  border: 1px solid #dee2e6; border-radius: 4px; padding: 4px 8px;
+  outline: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 #traj-search:focus { border-color: #1890ff; }
 #traj-search-wrap.list-loading #traj-search { padding-right: 120px; }
 #traj-list-progress {
@@ -139,6 +150,13 @@ body {
 }
 .traj-item:hover, .traj-item.active { background: #f8f9fa; color: #1890ff; }
 .traj-item-muted { color: #94a3b8; cursor: default; }
+
+@media (max-width: 1050px) {
+  #topbar { flex-wrap: wrap; row-gap: 6px; }
+  #traj-search-wrap { flex: 1 1 280px; max-width: none; }
+  #traj-info { flex: 1 1 160px; max-width: 220px; }
+  #source-wrap { margin-left: 0; flex: 1 1 100%; max-width: none; }
+}
 
 /* ── 数据源浏览弹窗 ── */
 #source-modal {
@@ -1987,7 +2005,7 @@ function clearTrajectoryVisuals() {
   S.currentIndexData = null;
   S.currentTrajectoryUuid = '';
   objectMeshData = [];
-  $('traj-search').value = '';
+  setTrajectorySearchLabel('');
   $('traj-info').textContent = '';
   $('frame-slider').max = 0;
   $('frame-slider').value = 0;
@@ -2013,7 +2031,7 @@ function setTrajectoryList(trajs, options = {}) {
       const active = S.trajIndex === null
         ? null
         : _allTrajs.find(traj => traj.index === S.trajIndex);
-      $('traj-search').value = active?.label || _allTrajs[0].label;
+      setTrajectorySearchLabel(active?.label || _allTrajs[0].label);
     }
     if (options.refreshDropdown !== false) {
       renderDropdown($('traj-search').value || '');
@@ -2368,7 +2386,7 @@ async function loadTrajectory(index, options = {}) {
     S.currentIndexData = info.index_data || null;
     S.currentTrajectoryUuid = info.index_data?.uuid || info.uuid || '';
     const currentTraj = _allTrajs.find(traj => traj.index === index);
-    $('traj-search').value = currentTraj?.label || info.label || '';
+    setTrajectorySearchLabel(currentTraj?.label || info.label || '');
     applyObjectMeshData([]);
 
     S.currentTrajectoryInfoBase = formatTrajectoryInfoBase(info);
@@ -2460,6 +2478,13 @@ const SHOW_MAX = Infinity;
 
 function trajectoryDisplayLabel(label, index) {
   return label;
+}
+
+function setTrajectorySearchLabel(label) {
+  const input = $('traj-search');
+  const value = String(label || '');
+  input.value = value;
+  input.title = value;
 }
 
 function formatTrajectoryInfoBase(info) {
@@ -2573,7 +2598,7 @@ function setTrajectorySearchMode(mode) {
     btn.classList.toggle('active', btn.dataset.searchMode === S.searchMode);
   });
   $('traj-search').placeholder = S.searchMode === 'uuid' ? '搜索 UUID…' : '搜索轨迹名…';
-  $('traj-search').value = '';
+  setTrajectorySearchLabel('');
   renderDropdown('');
 }
 
@@ -2596,6 +2621,7 @@ function renderDropdown(keyword) {
       const main = document.createElement('span');
       main.className = 'traj-item-main';
       main.textContent = trajectoryDisplayLabel(label, index);
+      main.title = label;
       el.appendChild(main);
       if (motion_interval) {
         const interval = document.createElement('span');
@@ -2606,7 +2632,7 @@ function renderDropdown(keyword) {
       }
       if (index === S.trajIndex) el.classList.add('active');
       el.onclick = () => {
-        $('traj-search').value = label;
+        setTrajectorySearchLabel(label);
         dd.classList.remove('open');
         loadTrajectory(index);
       };

@@ -339,6 +339,7 @@ class OptimizedLanceLoader:
                     "index.scene",
                     "index.operator",
                     "index.uuid",
+                    "index.gesture",
                     "trajectory_metadata.total_frames",
                     "trajectory_metadata.trajectory_info.object_move",
                 ],
@@ -350,6 +351,7 @@ class OptimizedLanceLoader:
                 scene_list = batch["index.scene"].to_pylist()
                 operator_list = batch["index.operator"].to_pylist()
                 uuid_list = batch["index.uuid"].to_pylist()
+                gesture_list = batch["index.gesture"].to_pylist()
                 total_frames_list = batch["trajectory_metadata.total_frames"].to_pylist()
                 object_move_list = batch["trajectory_metadata.trajectory_info.object_move"].to_pylist()
                 row_ids = batch["_rowid"].to_pylist()
@@ -367,8 +369,12 @@ class OptimizedLanceLoader:
                         operator_cache[operator_raw] = operator
                     frames = total_frames_list[batch_offset] or 0
                     frame_text = f"{frames}帧" if frames > 0 else "不可用"
+                    gesture = str(gesture_list[batch_offset] or "").strip()
                     motion_interval = _motion_interval_text(object_move_list[batch_offset])
-                    label = f"{i:03d}: {scene} ({operator}) - {frame_text}"
+                    if gesture:
+                        label = f"{i:03d}: {scene} / {gesture} ({operator}) - {frame_text}"
+                    else:
+                        label = f"{i:03d}: {scene} ({operator}) - {frame_text}"
                     uuid = uuid_list[batch_offset] or ""
                     options.append((label, i, uuid, motion_interval, _sort_text(scene), ""))
                     loaded_rows += 1
