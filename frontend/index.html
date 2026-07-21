@@ -210,9 +210,9 @@ body {
 .play-row { display: flex; gap: 5px; margin-top: 6px; }
 .btn { flex: 1; padding: 5px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; }
 #btn-play { background: #1890ff; color: #fff; }
-#btn-pause { background: #f8f9fa; color: #2c3e50; }
+#btn-speed { flex: 0 0 50px; background: #f8f9fa; color: #2c3e50; }
 #btn-play:hover { background: #096dd9; }
-#btn-pause:hover { background: #dde1e3; }
+#btn-speed:hover { background: #dde1e3; }
 
 .cb-group { display: flex; flex-direction: column; gap: 3px; }
 .cb-row { display: flex; align-items: center; gap: 6px; cursor: pointer; line-height: 1.6; }
@@ -446,7 +446,7 @@ select.small { width: 100%; background: #ffffff; color: #2c3e50; border: 1px sol
       <div id="frame-label">帧 0 / 0</div>
       <div class="play-row">
         <button class="btn" id="btn-play">▶ 播放</button>
-        <button class="btn" id="btn-pause">⏸ 暂停</button>
+        <button class="btn" id="btn-speed" title="切换播放倍速（1.0x / 0.5x / 0.25x）">1.0x</button>
       </div>
     </div>
     <div class="sec">
@@ -562,6 +562,8 @@ const S = {
   lancePath: '',
   playTimer: null,
   _playing: false,
+  _playbackClock: null,
+  playbackSpeed: 1.0,
   playFps: 15,
   playRenderFps: 45,
   showTrajectoryIndex: false,
@@ -786,9 +788,38 @@ function startTrajectoryListProgressPolling(seq, sessionId) {
   void pollTrajectoryListProgress(seq, sessionId);
 }
 
+const PLAYBACK_SPEEDS = [1.0, 0.5, 0.25];
+
+function updatePlayButton() {
+  const button = $('btn-play');
+  if (!button) return;
+  button.textContent = S._playing ? '⏸ 暂停' : '▶ 播放';
+  button.setAttribute('aria-label', S._playing ? '暂停' : '播放');
+}
+
+function updateSpeedButton() {
+  const button = $('btn-speed');
+  if (!button) return;
+  button.textContent = `${S.playbackSpeed.toFixed(2).replace(/0$/, '')}x`;
+  button.setAttribute('aria-label', `播放倍速 ${button.textContent}`);
+}
+
+function setPlaybackSpeed(speed) {
+  if (S._playing && S._playbackClock) {
+    const now = performance.now();
+    S._playbackClock.startFrame = S.frameIdx;
+    S._playbackClock.startTime = now;
+    S._playbackClock.nextRenderTime = now;
+  }
+  S.playbackSpeed = speed;
+  updateSpeedButton();
+}
+
 function stopPlay() {
   if (S.playTimer) { clearTimeout(S.playTimer); S.playTimer = null; }
   S._playing = false;
+  S._playbackClock = null;
+  updatePlayButton();
 }
 
 async function checkAssetsVersion({ reload = true } = {}) {
@@ -1645,7 +1676,7 @@ async function refreshFrame() {
   })();
 
   try {
-    const d3 = await framePromise;
+    const [d3, dv] = await Promise.all([framePromise, videoPromise]);
 
     // 如果有更新的请求已经发出，丢弃本次结果
     if (seq !== _frameSeq) return;
@@ -1656,20 +1687,14 @@ async function refreshFrame() {
     } catch (e) {
       console.warn('3D view update failed', e);
     }
-    void videoPromise.then(dv => {
-      if (seq !== _frameSeq) return;
-      if (dv) {
-        $('video-img').src = dv.data_uri;
-        $('video-img').style.display = 'block';
-        $('video-none').style.display = 'none';
-      } else if (S.numCameras > 0) {
-        $('video-img').style.display = 'none';
-        $('video-none').style.display = '';
-      }
-    }).catch(e => {
-      if (seq !== _frameSeq) return;
-      console.warn('video view update failed', e);
-    });
+    if (dv) {
+      $('video-img').src = dv.data_uri;
+      $('video-img').style.display = 'block';
+      $('video-none').style.display = 'none';
+    } else if (S.numCameras > 0) {
+      $('video-img').style.display = 'none';
+      $('video-none').style.display = '';
+    }
     void cmaPromise.then(dcma => {
       if (seq !== _frameSeq) return;
       S.lastCma = dcma || null;
@@ -2368,7 +2393,6 @@ async function loadTrajectory(index, options = {}) {
     hideLoading();
 
     const backgroundParts = [];
-    if (info.num_cameras > 0) backgroundParts.push('视频');
     if (info.has_object_mesh) backgroundParts.push('物体');
     backgroundParts.push('曲线');
     const backgroundLabel = backgroundParts.join('、');
@@ -2664,32 +2688,40 @@ $('btn-browser-up').onclick = () => {
   .forEach(id => $(id).onchange = refreshFrame);
 
 $('btn-play').onclick = () => {
-  if (S._playing) return; // 防止重复点击
-  stopPlay();
+  if (S._playing) {
+    stopPlay();
+    return;
+  }
   S._playing = true;
+  updatePlayButton();
   const sourceFrameMs = 10; // 原始 CMA 数据固定 100Hz，每两帧间隔 0.01 秒
   const renderFrameMs = Math.max(20, 1000 / (S.playRenderFps || 45));
-  const startFrame = S.frameIdx;
-  const startTime = performance.now();
-  let nextRenderTime = startTime;
+  const clock = {
+    startFrame: S.frameIdx,
+    startTime: performance.now(),
+    nextRenderTime: performance.now(),
+  };
+  S._playbackClock = clock;
 
   function nextRenderDelay() {
-    const elapsed = performance.now() - startTime;
-    const targetFrame = startFrame + Math.floor(elapsed / sourceFrameMs);
+    const speed = Math.max(0.01, Number(S.playbackSpeed) || 1);
+    const elapsed = performance.now() - clock.startTime;
+    const targetFrame = clock.startFrame + Math.floor(elapsed * speed / sourceFrameMs);
     if (targetFrame <= S.frameIdx) {
-      const nextSourceTime = startTime + (S.frameIdx + 1 - startFrame) * sourceFrameMs;
-      return Math.max(0, Math.max(nextRenderTime, nextSourceTime) - performance.now());
+      const nextSourceTime = clock.startTime + (S.frameIdx + 1 - clock.startFrame) * sourceFrameMs / speed;
+      return Math.max(0, Math.max(clock.nextRenderTime, nextSourceTime) - performance.now());
     }
-    return Math.max(0, nextRenderTime - performance.now());
+    return Math.max(0, clock.nextRenderTime - performance.now());
   }
 
   async function step() {
-    if (!S._playing) return;
-    if (S.frameIdx >= S.totalFrames - 1) { stopPlay(); $('btn-play').textContent = '▶ 播放'; return; }
-    const elapsed = performance.now() - startTime;
+    if (!S._playing || S._playbackClock !== clock) return;
+    if (S.frameIdx >= S.totalFrames - 1) { stopPlay(); return; }
+    const speed = Math.max(0.01, Number(S.playbackSpeed) || 1);
+    const elapsed = performance.now() - clock.startTime;
     const targetFrame = Math.min(
       S.totalFrames - 1,
-      startFrame + Math.floor(elapsed / sourceFrameMs)
+      clock.startFrame + Math.floor(elapsed * speed / sourceFrameMs)
     );
     if (targetFrame <= S.frameIdx) {
       S.playTimer = setTimeout(step, nextRenderDelay());
@@ -2697,16 +2729,21 @@ $('btn-play').onclick = () => {
     }
     S.frameIdx = targetFrame;
     $('frame-slider').value = S.frameIdx;
-    nextRenderTime = Math.max(nextRenderTime + renderFrameMs, performance.now());
+    clock.nextRenderTime = Math.max(clock.nextRenderTime + renderFrameMs, performance.now());
     await refreshFrame();
-    if (!S._playing) return;
-    if (S.frameIdx >= S.totalFrames - 1) { stopPlay(); $('btn-play').textContent = '▶ 播放'; return; }
+    if (!S._playing || S._playbackClock !== clock) return;
+    if (S.frameIdx >= S.totalFrames - 1) { stopPlay(); return; }
     S.playTimer = setTimeout(step, nextRenderDelay());
   }
-  $('btn-play').textContent = '⏸ 播放中';
   S.playTimer = setTimeout(step, 0);
 };
-$('btn-pause').onclick = () => { stopPlay(); $('btn-play').textContent = '▶ 播放'; };
+$('btn-speed').onclick = () => {
+  const currentIndex = PLAYBACK_SPEEDS.indexOf(S.playbackSpeed);
+  const nextIndex = (currentIndex + 1) % PLAYBACK_SPEEDS.length;
+  setPlaybackSpeed(PLAYBACK_SPEEDS[nextIndex]);
+};
+updatePlayButton();
+updateSpeedButton();
 
 // ════════════════════════════════════════════════════════
 // 启动
