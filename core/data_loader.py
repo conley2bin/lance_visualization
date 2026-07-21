@@ -1,4 +1,5 @@
 import lance
+from bisect import bisect_left
 from collections import OrderedDict
 from pathlib import Path
 from threading import Condition, RLock
@@ -130,11 +131,67 @@ class OptimizedLanceLoader:
         self._metadata_cache: dict = {}
         self._video_cache: OrderedDict = OrderedDict()
         self._max_video_cache = 3  # 最多缓存3个轨迹的视频
+        self._fragment_offsets: dict[int, tuple[int, int, list[int]]] | None = None
+        self._fragment_offsets_lock = RLock()
         self._trajectory_options_entry = _get_trajectory_options_entry(
             self.lance_path,
             self.dataset_fingerprint,
             self.total_rows,
         )
+
+    def _load_fragment_offsets(self) -> dict[int, tuple[int, int, list[int]]]:
+        """建立 Lance physical row id 到逻辑 dataset 行号的映射。"""
+        if self._fragment_offsets is not None:
+            return self._fragment_offsets
+
+        with self._fragment_offsets_lock:
+            if self._fragment_offsets is not None:
+                return self._fragment_offsets
+
+            offsets: dict[int, tuple[int, int, list[int]]] = {}
+            logical_offset = 0
+            fragments = sorted(
+                self.dataset.get_fragments(),
+                key=lambda fragment: int(fragment.fragment_id),
+            )
+            for fragment in fragments:
+                fragment_id = int(fragment.fragment_id)
+                physical_rows = int(fragment.physical_rows or fragment.count_rows())
+                deleted_rows: list[int] = []
+                try:
+                    deletion_file = fragment.deletion_file()
+                    if deletion_file:
+                        deletion_path = Path(self.lance_path) / str(deletion_file)
+                        if deletion_path.exists():
+                            import pyarrow as pa
+                            import pyarrow.ipc as ipc
+
+                            with pa.memory_map(str(deletion_path), "r") as source:
+                                deleted_rows = sorted(
+                                    int(row["row_id"])
+                                    for row in ipc.open_file(source).read_all().to_pylist()
+                                )
+                except Exception as exc:
+                    print(f"[lance] 读取 fragment {fragment_id} deletion bitmap 失败: {exc}")
+
+                offsets[fragment_id] = (logical_offset, physical_rows, deleted_rows)
+                logical_offset += int(fragment.count_rows())
+
+            self._fragment_offsets = offsets
+            return offsets
+
+    def _row_id_to_index(self, row_id) -> int:
+        row_id = int(row_id)
+        fragment_id = row_id >> 32
+        physical_offset = row_id & 0xFFFFFFFF
+        fragment_info = self._load_fragment_offsets().get(fragment_id)
+        if fragment_info is None:
+            return row_id
+
+        logical_offset, physical_rows, deleted_rows = fragment_info
+        if physical_offset >= physical_rows:
+            return -1
+        return logical_offset + physical_offset - bisect_left(deleted_rows, physical_offset)
 
     def get_trajectory_info(self, index: int) -> dict:
         """获取指定轨迹的轻量信息（只加载 index + trajectory_metadata 列）。"""
@@ -298,8 +355,9 @@ class OptimizedLanceLoader:
                 row_ids = batch["_rowid"].to_pylist()
 
                 for batch_offset, scene_raw in enumerate(scene_list):
-                    # Lance 的 _rowid 低位是片内偏移，这里右移 32 位得到逻辑行号。
-                    i = int(row_ids[batch_offset]) >> 32
+                    i = self._row_id_to_index(row_ids[batch_offset])
+                    if i < 0 or i >= self.total_rows:
+                        continue
                     scene = str(scene_raw or "?")
 
                     operator_raw = operator_list[batch_offset] or "?"
