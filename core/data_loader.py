@@ -1,5 +1,6 @@
 import lance
 from collections import OrderedDict
+from pathlib import Path
 from threading import Condition, RLock
 import time
 
@@ -27,6 +28,19 @@ def _motion_interval_text(object_moves) -> str:
             continue
         intervals.append(f"{start}-{end}")
     return "; ".join(intervals)
+
+
+def _manifest_fingerprint(lance_path: str) -> str:
+    manifest = Path(lance_path) / "_latest.manifest"
+    try:
+        stat = manifest.stat()
+        return f"{stat.st_mtime_ns}:{stat.st_size}"
+    except OSError:
+        try:
+            stat = Path(lance_path).stat()
+            return f"{stat.st_mtime_ns}:{stat.st_size}"
+        except OSError:
+            return "missing"
 
 
 def _num_cameras_from_capture_info(capture_info) -> int:
@@ -92,29 +106,17 @@ def _get_trajectory_options_entry(lance_path: str, dataset_fingerprint: str, tot
         return entry
 
 
-def _dataset_fingerprint(dataset, total_rows: int) -> str:
+def _dataset_fingerprint(dataset, total_rows: int, lance_path: str) -> str:
     try:
         version = dataset.version
     except Exception:
         version = "unknown"
 
-    metadata = {}
-    try:
-        versions = dataset.versions()
-        if versions:
-            metadata = dict(versions[-1].get("metadata") or {})
-    except Exception:
-        pass
-
-    fields = [
+    return ":".join([
         str(version),
         str(total_rows),
-        str(metadata.get("total_rows", "")),
-        str(metadata.get("total_fragments", "")),
-        str(metadata.get("total_data_files", "")),
-        str(metadata.get("total_files_size", "")),
-    ]
-    return ":".join(fields)
+        _manifest_fingerprint(lance_path),
+    ])
 
 
 class OptimizedLanceLoader:
@@ -124,7 +126,7 @@ class OptimizedLanceLoader:
         self.lance_path = str(lance_path)
         self.dataset = lance.dataset(lance_path)
         self.total_rows = self.dataset.count_rows()
-        self.dataset_fingerprint = _dataset_fingerprint(self.dataset, self.total_rows)
+        self.dataset_fingerprint = _dataset_fingerprint(self.dataset, self.total_rows, self.lance_path)
         self._metadata_cache: dict = {}
         self._video_cache: OrderedDict = OrderedDict()
         self._max_video_cache = 3  # 最多缓存3个轨迹的视频
