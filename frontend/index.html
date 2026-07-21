@@ -2481,6 +2481,15 @@ function searchableTrajectoryLabel(label) {
 
 function parseTrajectoryLabel(label) {
   const text = searchableTrajectoryLabel(label);
+  const gestureAfterScene = text.match(/^(\d+):\s*(.*?)\s*\/\s*(.*?)\s+\((.*?)\)$/);
+  if (gestureAfterScene) {
+    return {
+      rowIndex: gestureAfterScene[1] || '',
+      objectName: gestureAfterScene[2] || '',
+      operator: gestureAfterScene[4] || '',
+      gesture: gestureAfterScene[3] || '',
+    };
+  }
   const match = text.match(/^(\d+):\s*(.*?)\s+\((.*?)\)(?:\s*\/\s*(.*))?$/);
   return {
     rowIndex: match?.[1] || '',

@@ -57,7 +57,7 @@ def _trajectory_label(index: int, index_data: dict | None, meta: dict | None) ->
     frames = meta.get("total_frames", 0) if meta else 0
     frame_text = f"{frames}帧" if frames > 0 else "不可用"
     if gesture:
-        return f"{index:03d}: {scene} ({operator}) / {gesture} - {frame_text}"
+        return f"{index:03d}: {scene} / {gesture} ({operator}) - {frame_text}"
     return f"{index:03d}: {scene} ({operator}) - {frame_text}"
 
 
