@@ -3,6 +3,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        # 基础镜像源：默认内网 Harbor；公网环境在 .env 设 BASE_IMAGE=python:3.10
+        - BASE_IMAGE=${BASE_IMAGE:-183.195.186.154:180/dockerhub/library/python:3.10}
     image: human-viz:latest
     container_name: human-viz
     env_file:

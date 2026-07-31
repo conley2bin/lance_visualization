@@ -20,7 +20,8 @@ datasets>=2.0.0,<3.2.0
 tqdm
 
 # 科学计算
-scipy>=1.7.0
+# scipy>=1.15 的 wheel 在 Debian 13 (glibc 2.41) 上 import 即段错误，钉到 <1.15
+scipy>=1.7.0,<1.15
 six>=1.16.0
 
 # 深度学习（CPU-only）

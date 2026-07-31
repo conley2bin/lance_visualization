@@ -1,7 +1,11 @@
 # ============================================
 # Lance 可视化 FastAPI 服务镜像
 # ============================================
-FROM 183.195.186.154:180/dockerhub/library/python:3.10
+# 基础镜像：默认公司内网 Harbor 缓存；公网环境用 --build-arg 覆盖，如：
+#   docker compose build --build-arg BASE_IMAGE=python:3.10
+# 或在 deploy/.env 中设置 BASE_IMAGE=python:3.10（docker-compose 已透传）
+ARG BASE_IMAGE=183.195.186.154:180/dockerhub/library/python:3.10
+FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
@@ -9,7 +13,7 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
     UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
-    UV_EXTRA_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pytorch/whl/cpu/
+    UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu/
 
 # 替换 Debian 源为清华镜像（避免 DNS 解析问题）
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
