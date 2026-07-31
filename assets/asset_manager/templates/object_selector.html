@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>物体选择 - Scene Editor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="home-link">← 返回首页</a>
+
+        <div class="header-row">
+            <h1>Scene 修改</h1>
+            <div class="step-indicator">第二步：选择可操作的 objects</div>
+        </div>
+
+        <!-- Current gesture display -->
+        <div class="gesture-header">
+            <div class="gesture-info">
+                <div class="gesture-image-small">
+                    <img id="gestureImage" src="" alt="">
+                </div>
+                <h2 id="gestureName">{{ gesture_name }}</h2>
+            </div>
+            <div class="legend">
+                <div class="legend-item">
+                    <span class="legend-badge">✓</span>
+                    <span>原始 scene 中的 object</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-highlight"></div>
+                    <span>当前选中的 object</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Object search box -->
+        <div class="search-box">
+            <input type="text" id="objectSearchInput" placeholder="物体搜索框">
+        </div>
+
+        <!-- Category tabs -->
+        <div class="tabs" id="objectCategoryTabs">
+            <!-- Tabs will be generated dynamically -->
+        </div>
+
+        <!-- Object grid -->
+        <div class="grid" id="objectGrid">
+            <!-- Objects will be loaded dynamically -->
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination" id="pagination">
+            <!-- Pagination controls will be generated dynamically -->
+        </div>
+
+        <!-- Action buttons -->
+        <div class="action-buttons">
+            <button class="btn btn-primary" onclick="submitChanges()">修改</button>
+            <button class="btn btn-back" onclick="goBack()">返回</button>
+        </div>
+    </div>
+
+    <script>
+        const gestureName = "{{ gesture_name }}";
+        let allObjects = [];
+        let objectCategories = [];
+        let currentCategory = 'all';
+        let selectedObjects = new Set();
+        let originalObjects = new Set();
+        let currentPage = 1;
+        const itemsPerPage = 12;
+
+        // Load data
+        async function loadData() {
+            // Load objects
+            const objResponse = await fetch('/api/objects');
+            const objData = await objResponse.json();
+            allObjects = objData.objects;
+            objectCategories = objData.categories;
+
+            // Load current scene data
+            const sceneResponse = await fetch(`/api/scene/${encodeURIComponent(gestureName)}`);
+            const sceneData = await sceneResponse.json();
+            originalObjects = new Set(sceneData.objects);
+            selectedObjects = new Set(sceneData.objects);
+
+            // Load gesture image
+            loadGestureImage();
+
+            renderCategoryTabs();
+            renderObjects();
+        }
+
+        // Load gesture image
+        function loadGestureImage() {
+            // Try to determine category from gesture name
+            fetch('/api/gestures')
+                .then(res => res.json())
+                .then(data => {
+                    const gesture = data.gestures.find(g => g.name === gestureName);
+                    if (gesture) {
+                        document.getElementById('gestureImage').src = gesture.image;
+                    }
+                });
+        }
+
+        // Render category tabs
+        function renderCategoryTabs() {
+            const tabsContainer = document.getElementById('objectCategoryTabs');
+            tabsContainer.innerHTML = objectCategories.map(cat =>
+                `<button class="tab ${cat === 'all' ? 'active' : ''}" onclick="selectObjectCategory('${cat}')">${cat}</button>`
+            ).join('');
+        }
+
+        // Select category
+        function selectObjectCategory(category) {
+            currentCategory = category;
+            currentPage = 1;
+
+            // Update active tab
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.toggle('active', tab.textContent === category);
+            });
+
+            renderObjects();
+        }
+
+        // Render objects
+        function renderObjects() {
+            const searchTerm = document.getElementById('objectSearchInput').value.toLowerCase();
+
+            let filtered = allObjects.filter(obj => {
+                const matchCategory = currentCategory === 'all' || obj.category === currentCategory;
+                const matchSearch = obj.name.toLowerCase().includes(searchTerm) ||
+                                  (obj.description && obj.description.toLowerCase().includes(searchTerm));
+                return matchCategory && matchSearch;
+            });
+
+            const totalPages = Math.ceil(filtered.length / itemsPerPage);
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            const paginatedItems = filtered.slice(startIndex, endIndex);
+
+            const grid = document.getElementById('objectGrid');
+            grid.innerHTML = paginatedItems.map(obj => {
+                const isCurrentlySelected = selectedObjects.has(obj.name);
+                const isInScene = originalObjects.has(obj.name);
+
+                // Build label with dimensions
+                let labelHTML = obj.name;
+                if (obj.dimensions) {
+                    labelHTML += `<span class="dimensions-separator">|</span>${obj.dimensions}`;
+                }
+
+                return `
+                    <div class="card ${isCurrentlySelected ? 'selected' : ''}" onclick="toggleObject('${obj.name}')">
+                        <div class="card-image">
+                            <img src="${obj.image}" alt="${obj.name}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22%3E%3Crect fill=%22%23ddd%22 width=%22200%22 height=%22200%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23999%22%3ENo Image%3C/text%3E%3C/svg%3E'">
+                            ${isInScene ? '<div class="badge">✓</div>' : ''}
+                        </div>
+                        <div class="card-label">${labelHTML}</div>
+                    </div>
+                `;
+            }).join('');
+
+            renderPagination(totalPages, filtered.length);
+        }
+
+        // Render pagination controls
+        function renderPagination(totalPages, totalItems) {
+            const pagination = document.getElementById('pagination');
+
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+
+            let html = `<div class="pagination-info">共 ${totalItems} 项，第 ${currentPage}/${totalPages} 页</div>`;
+            html += '<div class="pagination-controls">';
+
+            // Previous button
+            html += `<button class="pagination-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">上一页</button>`;
+
+            // Page numbers
+            const maxVisiblePages = 5;
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+            if (endPage - startPage < maxVisiblePages - 1) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+
+            if (startPage > 1) {
+                html += `<button class="pagination-btn" onclick="changePage(1)">1</button>`;
+                if (startPage > 2) html += '<span class="pagination-ellipsis">...</span>';
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}\" onclick="changePage(${i})">${i}</button>`;
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) html += '<span class="pagination-ellipsis">...</span>';
+                html += `<button class="pagination-btn" onclick="changePage(${totalPages})">${totalPages}</button>`;
+            }
+
+            // Next button
+            html += `<button class="pagination-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${currentPage + 1})">下一页</button>`;
+
+            html += '</div>';
+            pagination.innerHTML = html;
+        }
+
+        // Change page
+        function changePage(page) {
+            currentPage = page;
+            renderObjects();
+            window.scrollTo(0, 0);
+        }
+
+        // Toggle object selection
+        function toggleObject(objectName) {
+            if (selectedObjects.has(objectName)) {
+                selectedObjects.delete(objectName);
+            } else {
+                selectedObjects.add(objectName);
+            }
+            renderObjects();
+        }
+
+        // Submit changes
+        async function submitChanges() {
+            const response = await fetch(`/api/scene/${encodeURIComponent(gestureName)}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    objects: Array.from(selectedObjects)
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                originalObjects = new Set(result.objects);
+                renderObjects();
+            }
+        }
+
+        // Go back to gesture selection page
+        function goBack() {
+            window.location.href = '/scene';
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadData();
+
+            document.getElementById('objectSearchInput').addEventListener('input', () => {
+                currentPage = 1;
+                renderObjects();
+            });
+        });
+    </script>
+</body>
+</html>

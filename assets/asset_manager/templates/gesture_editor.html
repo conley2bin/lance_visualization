@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesture 管理</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="home-link">← 返回首页</a>
+
+        <div class="header-row">
+            <h1>当前gestures</h1>
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-highlight"></div>
+                    <span>当前选中的gesture</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Consistency warning banner -->
+        <div id="warningBanner" class="warning-banner" style="display: none;"></div>
+
+        <!-- Search box -->
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="搜索手势">
+        </div>
+
+        <!-- Category tabs -->
+        <div class="tabs" id="categoryTabs"></div>
+
+        <!-- Gesture grid -->
+        <div class="grid" id="gestureGrid"></div>
+
+        <!-- Pagination -->
+        <div class="pagination" id="pagination"></div>
+
+        <!-- Action buttons -->
+        <div class="action-buttons">
+            <button class="btn btn-primary" onclick="showCreateModal()">新建手势</button>
+            <button class="btn btn-back" onclick="showDeleteModal()">删除选中</button>
+        </div>
+    </div>
+
+    <!-- Create gesture modal -->
+    <div id="createModal" class="modal">
+        <div class="modal-content">
+            <h2>新建手势</h2>
+
+            <!-- Type selection -->
+            <div class="form-group">
+                <label>手势类型</label>
+                <select id="typeSelect" onchange="handleTypeChange()">
+                    <option value="">选择类型...</option>
+                </select>
+            </div>
+
+            <div id="newTypeGroup" class="form-group" style="display: none;">
+                <label>新类型名称</label>
+                <input type="text" id="newTypeInput" placeholder="大小写字母、数字和连字符">
+            </div>
+
+            <!-- Manual prefix option -->
+            <div class="form-group">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="manualPrefixCheckbox" onchange="toggleManualPrefix()" style="margin-right: 10px;">
+                    <span>手动指定序号</span>
+                </label>
+                <p style="font-size: 13px; color: #666; margin-top: 5px;">选中后可为每个手势指定序号</p>
+                <p style="font-size: 13px; color: #666; margin-top: 5px;">未选中自动从可选最大序号增量编号，此时文件名包含序号（如 001-gesture），将自动清除序号，只保留 gesture 部分</p>
+            </div>
+
+            <!-- Prefix display -->
+            <div id="prefixDisplay" class="prefix-display"></div>
+
+            <!-- Drag-drop area -->
+            <div id="dropZone" class="drop-zone">
+                <p>拖拽图片到此处或点击选择</p>
+                <p style="font-size: 13px; color: #666; margin-top: 10px;">文件名不能包含空格，仅支持字母、数字、连字符(-)、下划线(_)</p>
+                <input type="file" id="fileInput" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.bmp" style="display: none;">
+            </div>
+
+            <!-- Image list -->
+            <div id="imageList" class="image-list"></div>
+
+            <!-- Buttons -->
+            <div class="modal-buttons">
+                <button class="btn btn-primary" onclick="saveGestures()">保存手势</button>
+                <button class="btn btn-back" onclick="closeCreateModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete confirmation modal -->
+    <div id="deleteModal" class="modal">
+        <div class="modal-content">
+            <h2>确认删除</h2>
+            <p>确认删除选中的手势吗？</p>
+            <div id="deletePreview" class="delete-preview"></div>
+            <div class="modal-buttons">
+                <button class="btn btn-primary" onclick="confirmDelete()">确认删除</button>
+                <button class="btn btn-back" onclick="closeDeleteModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allGestures = [];
+        let categories = [];
+        let currentCategory = 'all';
+        let selectedGestures = new Set();
+        let currentPage = 1;
+        const itemsPerPage = 12;
+
+        let uploadedFiles = [];
+        let gestureTypes = [];
+        let usedPrefixes = [];
+        let consistencyIssues = null;
+        let manualPrefixMode = false;
+
+        // Load gestures
+        async function loadGestures() {
+            const response = await fetch('/api/gestures');
+            const data = await response.json();
+            allGestures = data.gestures;
+            categories = data.categories;
+
+            // Check for missing prefixes
+            allGestures.forEach(g => {
+                if (!g.name.match(/^\d+-/)) {
+                    console.warn(`警告: 手势 "${g.name}" 缺少序号前缀`);
+                }
+            });
+
+            renderTabs();
+            renderGestures();
+
+            // Check consistency on load
+            await checkConsistency();
+        }
+
+        // Check consistency
+        async function checkConsistency() {
+            try {
+                const response = await fetch('/api/gesture/check-consistency');
+                const data = await response.json();
+                if (data.success) {
+                    consistencyIssues = data.issues;
+                    renderWarningBanner();
+                }
+            } catch (error) {
+                console.error('Consistency check failed:', error);
+            }
+        }
+
+        // Render warning banner
+        function renderWarningBanner() {
+            const banner = document.getElementById('warningBanner');
+            if (!consistencyIssues) {
+                banner.style.display = 'none';
+                return;
+            }
+
+            const counts = {
+                missing_images: consistencyIssues.missing_images.length,
+                unregistered_images: consistencyIssues.unregistered_images.length,
+                missing_dirs: consistencyIssues.missing_dirs.length,
+                orphan_dirs: consistencyIssues.orphan_dirs.length,
+                empty_types: consistencyIssues.empty_types.length
+            };
+
+            const totalIssues = Object.values(counts).reduce((a, b) => a + b, 0);
+
+            if (totalIssues === 0) {
+                banner.style.display = 'none';
+                return;
+            }
+
+            let html = '<div class="warning-content">';
+            html += `<span class="warning-icon">⚠</span>`;
+            html += `<span class="warning-text">检测到 ${totalIssues} 个一致性问题：</span>`;
+            html += '<div class="warning-issues">';
+
+            if (counts.missing_images > 0) {
+                html += `<div class="warning-issue">`;
+                html += `<span>${counts.missing_images} 个手势缺失图片</span>`;
+                html += `<button class="btn-fix" onclick="fixIssue('missing_images')">修正</button>`;
+                html += `</div>`;
+            }
+
+            if (counts.unregistered_images > 0) {
+                html += `<div class="warning-issue">`;
+                html += `<span>${counts.unregistered_images} 个图片未注册</span>`;
+                html += `<button class="btn-fix" onclick="fixIssue('unregistered_images')">修正</button>`;
+                html += `</div>`;
+            }
+
+            if (counts.missing_dirs > 0) {
+                html += `<div class="warning-issue">`;
+                html += `<span>${counts.missing_dirs} 个类型目录缺失</span>`;
+                html += `<button class="btn-fix" onclick="fixIssue('missing_dirs')">修正</button>`;
+                html += `</div>`;
+            }
+
+            if (counts.orphan_dirs > 0) {
+                html += `<div class="warning-issue">`;
+                html += `<span>${counts.orphan_dirs} 个孤立目录</span>`;
+                html += `<button class="btn-fix" onclick="fixIssue('orphan_dirs')">修正</button>`;
+                html += `</div>`;
+            }
+
+            if (counts.empty_types > 0) {
+                html += `<div class="warning-issue">`;
+                html += `<span>${counts.empty_types} 个空类型</span>`;
+                html += `<button class="btn-fix" onclick="fixIssue('empty_types')">修正</button>`;
+                html += `</div>`;
+            }
+
+            html += '</div></div>';
+            banner.innerHTML = html;
+            banner.style.display = 'block';
+        }
+
+        // Fix consistency issue
+        async function fixIssue(issueType) {
+            try {
+                const response = await fetch('/api/gesture/fix-consistency', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({type: issueType})
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    const result = data.result;
+                    let message = `已修正 ${result.fixed.length} 项`;
+
+                    if (result.needs_rename && result.needs_rename.length > 0) {
+                        message += `\n\n需要重命名的文件 (${result.needs_rename.length} 个):\n`;
+                        result.needs_rename.forEach(item => {
+                            message += `\n${item.type}/${item.file} (当前名称: ${item.current_name})`;
+                        });
+                        message += '\n\n请手动重命名这些文件，添加序号前缀（如 01-），然后刷新页面重新检查。';
+                    }
+
+                    alert(message);
+                    await loadGestures();
+                } else {
+                    alert(`修正失败: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`修正失败: ${error.message}`);
+            }
+        }
+
+        // Render category tabs
+        function renderTabs() {
+            const tabsContainer = document.getElementById('categoryTabs');
+            tabsContainer.innerHTML = categories.map(cat =>
+                `<button class="tab ${cat === 'all' ? 'active' : ''}" onclick="selectCategory('${cat}')">${cat}</button>`
+            ).join('');
+        }
+
+
+        // Select category
+        function selectCategory(category) {
+            currentCategory = category;
+            currentPage = 1;
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.toggle('active', tab.textContent === category);
+            });
+            renderGestures();
+        }
+
+        // Render gestures
+        function renderGestures() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            let filtered = allGestures.filter(g => {
+                const matchCategory = currentCategory === 'all' || g.category === currentCategory;
+                const matchSearch = g.name.toLowerCase().includes(searchTerm);
+                return matchCategory && matchSearch;
+            });
+
+            const totalPages = Math.ceil(filtered.length / itemsPerPage);
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            const paginatedItems = filtered.slice(startIndex, endIndex);
+
+            const grid = document.getElementById('gestureGrid');
+            grid.innerHTML = paginatedItems.map(gesture => {
+                const isSelected = selectedGestures.has(gesture.name);
+                const hasPrefix = gesture.name.match(/^\d+-/);
+                const warningBadge = !hasPrefix ? '<div class="warning-badge">⚠</div>' : '';
+
+                return `
+                    <div class="card ${isSelected ? 'selected' : ''}" onclick="toggleGesture('${gesture.name}')">
+                        <div class="card-image">
+                            <img src="${gesture.image}" alt="${gesture.name}">
+                            ${warningBadge}
+                        </div>
+                        <div class="card-label">${gesture.name}</div>
+                    </div>
+                `;
+            }).join('');
+
+            renderPagination(totalPages, filtered.length);
+        }
+
+        // Render pagination
+        function renderPagination(totalPages, totalItems) {
+            const pagination = document.getElementById('pagination');
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+
+            let html = `<div class="pagination-info">共 ${totalItems} 项，第 ${currentPage}/${totalPages} 页</div>`;
+            html += '<div class="pagination-controls">';
+            html += `<button class="pagination-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">上一页</button>`;
+
+            const maxVisiblePages = 5;
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+            if (endPage - startPage < maxVisiblePages - 1) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+
+            if (startPage > 1) {
+                html += `<button class="pagination-btn" onclick="changePage(1)">1</button>`;
+                if (startPage > 2) html += '<span class="pagination-ellipsis">...</span>';
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="changePage(${i})">${i}</button>`;
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) html += '<span class="pagination-ellipsis">...</span>';
+                html += `<button class="pagination-btn" onclick="changePage(${totalPages}))">${totalPages}</button>`;
+            }
+
+            html += `<button class="pagination-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${currentPage + 1})">下一页</button>`;
+            html += '</div>';
+            pagination.innerHTML = html;
+        }
+
+        // Change page
+        function changePage(page) {
+            currentPage = page;
+            renderGestures();
+            window.scrollTo(0, 0);
+        }
+
+        // Toggle gesture selection
+        function toggleGesture(gestureName) {
+            if (selectedGestures.has(gestureName)) {
+                selectedGestures.delete(gestureName);
+            } else {
+                selectedGestures.add(gestureName);
+            }
+            renderGestures();
+        }
+
+        // Show create modal
+        async function showCreateModal() {
+            // Load gesture types
+            const response = await fetch('/api/gesture/types');
+            const data = await response.json();
+            gestureTypes = data.types;
+
+            const typeSelect = document.getElementById('typeSelect');
+            typeSelect.innerHTML = '<option value="">选择类型...</option>' +
+                gestureTypes.map(t => `<option value="${t}">${t}</option>`).join('') +
+                '<option value="__new__">新建类型...</option>';
+
+            uploadedFiles = [];
+            document.getElementById('imageList').innerHTML = '';
+            document.getElementById('prefixDisplay').innerHTML = '';
+            document.getElementById('newTypeGroup').style.display = 'none';
+            document.getElementById('manualPrefixCheckbox').checked = false;
+            manualPrefixMode = false;
+            document.getElementById('createModal').style.display = 'flex';
+        }
+
+        // Close create modal
+        function closeCreateModal() {
+            document.getElementById('createModal').style.display = 'none';
+        }
+
+        // Toggle manual prefix mode
+        function toggleManualPrefix() {
+            manualPrefixMode = document.getElementById('manualPrefixCheckbox').checked;
+            renderImageList();
+        }
+
+        // Handle type change
+        async function handleTypeChange() {
+            const typeSelect = document.getElementById('typeSelect');
+            const newTypeGroup = document.getElementById('newTypeGroup');
+            const prefixDisplay = document.getElementById('prefixDisplay');
+
+            if (typeSelect.value === '__new__') {
+                newTypeGroup.style.display = 'block';
+                // Load all prefixes for new type too
+                const response = await fetch('/api/gesture/all-prefixes');
+                const data = await response.json();
+                usedPrefixes = data.used_prefixes;
+                renderPrefixDisplay();
+            } else if (typeSelect.value) {
+                newTypeGroup.style.display = 'none';
+
+                // Load all prefixes globally
+                const response = await fetch('/api/gesture/all-prefixes');
+                const data = await response.json();
+                usedPrefixes = data.used_prefixes;
+
+                renderPrefixDisplay();
+            } else {
+                newTypeGroup.style.display = 'none';
+                prefixDisplay.innerHTML = '';
+            }
+        }
+
+        // Render prefix display
+        function renderPrefixDisplay() {
+            const prefixDisplay = document.getElementById('prefixDisplay');
+            if (usedPrefixes.length === 0) {
+                prefixDisplay.innerHTML = '<p class="prefix-hint">当前无手势，系统将从 001 开始自动编号</p>';
+                return;
+            }
+
+            const maxPrefix = Math.max(...usedPrefixes);
+            let html = '<div class="prefix-list"><p class="prefix-hint">全局已使用序号：</p>';
+
+            for (let i = 1; i <= maxPrefix; i++) {
+                const isUsed = usedPrefixes.includes(i);
+                const prefixStr = String(i).padStart(3, '0');
+                const className = isUsed ? 'prefix-used' : 'prefix-available';
+                html += `<span class="${className}">${prefixStr}</span>`;
+            }
+
+            // Show next available
+            const nextPrefix = String(maxPrefix + 1).padStart(3, '0');
+            html += `<span class="prefix-available" style="background-color: #d4edda; border: 2px solid #28a745; font-weight: bold;">${nextPrefix}</span>`;
+
+            html += '</div>';
+            prefixDisplay.innerHTML = html;
+        }
+
+        // Setup drag-drop
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        // Handle uploaded files
+        function handleFiles(files) {
+            for (let file of files) {
+                const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+                if (!['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'].includes(ext)) {
+                    alert(`不支持的图片格式: ${ext}`);
+                    continue;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    let baseName = file.name.substring(0, file.name.lastIndexOf('.'));
+                    // Remove prefix if present
+                    baseName = baseName.replace(/^\d+-/, '');
+                    uploadedFiles.push({
+                        file: file,
+                        preview: e.target.result,
+                        name: baseName
+                    });
+                    renderImageList();
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // Render image list
+        function renderImageList() {
+            const imageList = document.getElementById('imageList');
+            imageList.innerHTML = uploadedFiles.map((item, index) => {
+                if (manualPrefixMode) {
+                    return `
+                        <div class="image-item">
+                            <img src="${item.preview}" alt="preview">
+                            <div style="display: flex; align-items: center; gap: 5px;">
+                                <label style="font-size: 13px; color: #666; white-space: nowrap;">序号:</label>
+                                <input type="text" pattern="[0-9]*" inputmode="numeric" min="1" max="999"
+                                       value="${item.prefix || ''}" placeholder="1-999"
+                                       style="width: 60px;" class="prefix-input"
+                                       onchange="updateImagePrefix(${index}, this.value)">
+                            </div>
+                            <input type="text" value="${item.name}" onchange="updateImageName(${index}, this.value)">
+                            <button class="btn-delete" onclick="removeImage(${index})">删除</button>
+                        </div>
+                    `;
+                } else {
+                    return `
+                        <div class="image-item">
+                            <img src="${item.preview}" alt="preview">
+                            <input type="text" value="${item.name}" onchange="updateImageName(${index}, this.value)">
+                            <button class="btn-delete" onclick="removeImage(${index})">删除</button>
+                        </div>
+                    `;
+                }
+            }).join('');
+        }
+
+        // Update image name
+        function updateImageName(index, newName) {
+            uploadedFiles[index].name = newName;
+        }
+
+        // Update image prefix
+        function updateImagePrefix(index, newPrefix) {
+            uploadedFiles[index].prefix = parseInt(newPrefix) || null;
+        }
+
+        // Remove image
+        function removeImage(index) {
+            uploadedFiles.splice(index, 1);
+            renderImageList();
+        }
+
+        // Save gestures
+        async function saveGestures() {
+            const typeSelect = document.getElementById('typeSelect');
+            const newTypeInput = document.getElementById('newTypeInput');
+
+            let gestureType = typeSelect.value;
+            let newType = '';
+
+            if (gestureType === '__new__') {
+                newType = newTypeInput.value.trim();
+                if (!newType) {
+                    alert('请输入新类型名称');
+                    return;
+                }
+                if (!/^[a-zA-Z0-9_-]+$/.test(newType)) {
+                    alert('类型名称只能包含字母、数字、连字符、下划线');
+                    return;
+                }
+            } else if (!gestureType) {
+                alert('请选择手势类型');
+                return;
+            }
+
+            if (uploadedFiles.length === 0) {
+                alert('请上传至少一张图片');
+                return;
+            }
+
+            // Validate names (no prefix required, system will add)
+            for (let item of uploadedFiles) {
+                if (!item.name || !item.name.trim()) {
+                    alert('手势名称不能为空');
+                    return;
+                }
+                // Remove any prefix if user added it
+                item.name = item.name.replace(/^\d+-/, '').trim();
+
+                // Validate filename: no spaces, only letters, numbers, hyphens, underscores
+                if (!/^[a-zA-Z0-9_-]+$/.test(item.name)) {
+                    alert(`手势名称 "${item.name}" 格式不正确\n\n文件名不能包含空格或特殊字符\n仅支持：字母、数字、连字符(-)、下划线(_)`);
+                    return;
+                }
+
+                // Validate manual prefix if in manual mode
+                if (manualPrefixMode) {
+                    if (!item.prefix || item.prefix < 1 || item.prefix > 99) {
+                        alert(`请为 "${item.name}" 指定有效的序号（1-999）`);
+                        return;
+                    }
+                    // Check if prefix is already used
+                    if (usedPrefixes.includes(item.prefix)) {
+                        alert(`序号 ${String(item.prefix).padStart(3, '0')} 已被使用，请选择其他序号`);
+                        return;
+                    }
+                }
+            }
+
+            // Check for duplicate manual prefixes
+            if (manualPrefixMode) {
+                const manualPrefixes = uploadedFiles.map(item => item.prefix);
+                const duplicates = manualPrefixes.filter((item, index) => manualPrefixes.indexOf(item) !== index);
+                if (duplicates.length > 0) {
+                    alert(`序号重复：${duplicates.map(p => String(p).padStart(3, '0')).join(', ')}\n请确保每个手势的序号唯一`);
+                    return;
+                }
+            }
+
+            // Prepare form data
+            const formData = new FormData();
+            if (newType) {
+                formData.append('new_type', newType);
+            } else {
+                formData.append('type', gestureType);
+            }
+
+            // Add manual prefix mode flag
+            formData.append('manual_prefix', manualPrefixMode);
+
+            uploadedFiles.forEach(item => {
+                formData.append('images', item.file);
+                formData.append('names', item.name);
+                if (manualPrefixMode) {
+                    formData.append('prefixes', item.prefix);
+                }
+            });
+
+            try {
+                const response = await fetch('/api/gesture/create', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    closeCreateModal();
+                    await loadGestures();
+                } else {
+                    alert(`创建失败: ${result.error}`);
+                }
+            } catch (error) {
+                alert(`创建失败: ${error.message}`);
+            }
+        }
+
+        // Show delete modal
+        function showDeleteModal() {
+            if (selectedGestures.size === 0) {
+                alert('请先选择要删除的手势');
+                return;
+            }
+
+            const deletePreview = document.getElementById('deletePreview');
+            deletePreview.innerHTML = Array.from(selectedGestures).map(name => {
+                const gesture = allGestures.find(g => g.name === name);
+                return `
+                    <div class="delete-item">
+                        <img src="${gesture.image}" alt="${name}">
+                        <span>${name}</span>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('deleteModal').style.display = 'flex';
+        }
+
+        // Close delete modal
+        function closeDeleteModal() {
+            document.getElementById('deleteModal').style.display = 'none';
+        }
+
+        // Confirm delete
+        async function confirmDelete() {
+            try {
+                const response = await fetch('/api/gesture/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({gestures: Array.from(selectedGestures)})
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    selectedGestures.clear();
+                    closeDeleteModal();
+                    await loadGestures();
+
+                    // Check if any type became empty and auto-delete
+                    await autoDeleteEmptyTypes();
+                } else {
+                    alert(`删除失败: ${result.error}`);
+                }
+            } catch (error) {
+                alert(`删除失败: ${error.message}`);
+            }
+        }
+
+        // Auto-delete empty types
+        async function autoDeleteEmptyTypes() {
+            try {
+                const response = await fetch('/api/gesture/check-consistency');
+                const data = await response.json();
+                if (data.success && data.issues.empty_types.length > 0) {
+                    // Silently fix empty types
+                    await fetch('/api/gesture/fix-consistency', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({type: 'empty_types'})
+                    });
+                    await loadGestures();
+                }
+            } catch (error) {
+                console.error('Auto-delete empty types failed:', error);
+            }
+        }
+
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadGestures();
+            document.getElementById('searchInput').addEventListener('input', () => {
+                currentPage = 1;
+                renderGestures();
+            });
+        });
+    </script>
+</body>
+</html>

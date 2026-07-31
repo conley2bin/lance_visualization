@@ -1,3 +1,0 @@
-[submodule "assets"]
-	path = assets
-	url = git@192.168.10.116:ai/group-dexcanvas/mano_assets.git

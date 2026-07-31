@@ -9,3 +9,10 @@ annotations/
 __pycache__/
 *.egg-info/
 .venv/
+
+# 本地搭建记录（机器特定，不追踪）
+*.local.md
+
+# 物体网格体积过大（1.3GB），不入库；通过网盘单独分发（见 SETUP_PUBLIC.md）
+# 入库的 assets：models/ operators/ gestures/ 等小文件（共约 12MB）
+assets/objects/
