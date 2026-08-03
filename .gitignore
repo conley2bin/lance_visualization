@@ -17,6 +17,6 @@ __pycache__/
 # 入库的 assets：models/ operators/ gestures/ 等小文件（共约 12MB）
 assets/objects/
 # 网盘分发的压缩包产物
-objects_full.tar.xz*
+objects.tar.xz*
 
 .pi-subagents/

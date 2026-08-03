@@ -48,15 +48,15 @@ Lance 数据集（手/物体/视频）+ assets 资源（MANO 模型、URDF、物
 | 内容 | 来源 | 说明 |
 |---|---|---|
 | 代码仓库 | git clone 或压缩包 | 已含 `assets/models`、`assets/operators`、`assets/gestures`（约 12MB） |
-| 物体网格包 `objects_full.tar.xz` | 百度网盘 | 42 个物体的 mesh，约 336MB，解压到 `assets/` |
+| 物体网格包 `objects.tar.xz` | 百度网盘 | 42 个物体的 mesh，约 336MB，解压到 `assets/` |
 | Lance 数据集 `.lance` | 百度网盘 | 要可视化的数据，放到本机任意目录 |
 
 ### 4.2 放置文件
 
 ```bash
 # 物体网格（sha256 校验和文件可用来核对下载完整性）
-sha256sum -c objects_full.tar.xz.sha256
-tar -xf objects_full.tar.xz -C /path/to/lance_visualization/assets/
+sha256sum -c objects.tar.xz.sha256
+tar -xf objects.tar.xz -C /path/to/lance_visualization/assets/
 ls /path/to/lance_visualization/assets/objects/bottle/bottle_aligned.stl   # 应存在
 ```
 
@@ -70,18 +70,17 @@ cp .env.example .env
 vim .env
 ```
 
+**只需要改一行**——把 `HOST_DATA_PATH` 改成 `.lance` 数据集所在的目录：
+
 ```bash
-BASE_IMAGE=python:3.10          # 公网基础镜像（默认是公司内网 Harbor，公网必须改这行）
-HOST_DATA_PATH=/path/to/data    # 数据目录，挂到容器 /data
-HOST_NAS_PATH=/path/to/data     # 同上，挂到容器同名路径；填 .lance 所在的上级目录
-APP_PORT=8868
+HOST_DATA_PATH=/path/to/lance_datasets
 ```
 
-说明：
+其余配置均有默认值，公网环境开箱即用：
 
-- Docker Hub 不可达时，`BASE_IMAGE` 换公共加速器（如 `docker.1ms.run/library/python:3.10`，可用性以当时 `docker pull` 实测为准）。
-- `HOST_NAS_PATH` 挂到容器内**同名路径**，所以前端里直接填宿主机的真实路径。
-- 数据库配置留空不影响可视化（仅关闭"最近数据源"列表）。
+- 基础镜像默认 `python:3.10`（Docker Hub）。拉不动时在 `.env` 加一行 `BASE_IMAGE=<公共加速器地址>`，如 `docker.1ms.run/library/python:3.10`（可用性以当时 `docker pull` 实测为准）
+- 数据目录同时挂载到容器 `/data` 和 NAS 同名路径，前端里直接填宿主机真实路径
+- 端口默认 8868；数据库功能默认关闭（仅影响"最近数据源"列表，不影响可视化）
 
 ### 4.4 构建、启动、验证
 
@@ -175,7 +174,7 @@ bottle_rot = d["rot_aa_1_bottle"]  # (T,3) 轴角弧度
 ```bash
 docker compose build
 docker save human-viz:latest -o human-viz.tar
-# 拷贝 human-viz.tar、代码、objects_full.tar.xz、.lance 数据到目标机器
+# 拷贝 human-viz.tar、代码、objects.tar.xz、.lance 数据到目标机器
 docker load -i human-viz.tar
 docker compose up -d    # 不带 --build
 ```
