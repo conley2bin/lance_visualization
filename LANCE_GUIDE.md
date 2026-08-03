@@ -94,6 +94,33 @@ docker logs human-viz               # 看到 Application startup complete
 curl http://localhost:8868/         # 返回 HTML
 ```
 
+### 4.5 备选：不用 Docker 本地运行
+
+机器上没有 Docker 时可以直接跑 Python 环境（**必须 Python 3.10**，chumpy/manotorch 在 3.11+ 不兼容）：
+
+有 uv（推荐，一条命令装齐含 GitHub 依赖）：
+
+```bash
+uv sync
+uv run uvicorn app:app --host 0.0.0.0 --port 8868
+```
+
+没有 uv（pip 路线）：
+
+```bash
+python3.10 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install --no-build-isolation git+https://github.com/mattloper/chumpy
+pip install git+https://github.com/lixiny/manotorch.git
+uvicorn app:app --host 0.0.0.0 --port 8868
+```
+
+说明：
+
+- 数据路径：本地运行没有容器挂载概念，前端数据源框直接填宿主机绝对路径即可（`/mnt` 下以 `nas` 开头的目录默认可浏览，其他路径设置 `DATA_BROWSER_ROOTS` 环境变量）
+- `chumpy` 必须带 `--no-build-isolation`（它的 setup.py 构建期依赖 pip/numpy）
+- `scipy` 被钉在 `<1.15`：新版 wheel 在 glibc 2.41 系统上 import 即段错误，不要放开
+
 ## 5. 使用
 
 1. 浏览器打开 `http://localhost:8868`

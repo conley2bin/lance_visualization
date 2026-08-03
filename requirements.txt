@@ -1,0 +1,49 @@
+# ============================================
+# Lance 可视化本地运行依赖（pip 用户）
+# 用法：python3.10 -m venv .venv && source .venv/bin/activate
+#       pip install -r requirements.txt
+#       pip install --no-build-isolation git+https://github.com/mattloper/chumpy
+#       pip install git+https://github.com/lixiny/manotorch.git
+# 注意：Python 必须 3.10（chumpy/manotorch 在 3.11+ 有兼容性问题）
+#       有 uv 的话推荐改用 `uv sync`（见 pyproject.toml，一条命令装齐）
+# ============================================
+
+# Web 服务
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+psycopg2-binary>=2.9.11
+
+# 数据处理
+numpy>=1.24.0,<1.27.0
+pyarrow>=10.0.0
+pylance>=0.9.0
+pyyaml>=6.0
+
+# 数据集加载
+huggingface_hub>=0.19.0
+datasets>=2.0.0,<3.2.0
+tqdm
+
+# 科学计算
+# scipy>=1.15 的 wheel 在新 Debian (glibc 2.41) 上 import 即段错误，钉到 <1.15
+scipy>=1.7.0,<1.15
+six>=1.16.0
+
+# 深度学习（CPU）
+torch>=2.0.0
+torchvision>=0.15.0
+
+# 3D 处理
+trimesh>=3.20.0
+pin==2.6.21
+
+# 图像处理
+opencv-python-headless>=4.8.0
+Pillow>=10.0.0
+
+# XML 处理（URDF）
+lxml>=4.9.0
+
+# MANO 依赖（需从 GitHub 源码安装，见文件顶部用法注释）：
+#   chumpy —— setup.py 构建期 import pip，必须 --no-build-isolation
+#   manotorch
