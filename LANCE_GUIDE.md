@@ -260,6 +260,7 @@ bottle_rot = d["rot_aa_1_bottle"]  # (T,3) 轴角弧度
 | 页面崩溃/卡死 | 关掉 "URDF Mesh" 刷新 |
 | "浏览"看不到数据目录 | 数据必须在 `HOST_DATA_PATH` 或 `HOST_NAS_PATH` 挂载范围内；改 `.env` 后 `docker compose up -d` 重建容器 |
 | 加载报"请选择 .lance 数据集路径" | `HOST_DATA_PATH` 填了 `.lance` 本身；改为填其上级目录，在前端里再选择具体 `.lance` |
+| 容器/导出报 Dataset not found（路径含 `/mnt/...`） | 容器内请用 `/data/...` 路径（`HOST_DATA_PATH` 挂载点）。`/mnt` 下的路径只有设置 `HOST_NAS_PATH` 后才与宿主机一致，未设置时 `/mnt/nas-222-project` 映射的是 `HOST_DATA_PATH` 自身 |
 
 ## 8. 完全离线场景
 
