@@ -20,3 +20,6 @@ assets/objects/
 objects.tar.xz*
 
 .pi-subagents/
+
+# 导出脚本默认输出目录
+export_out/
