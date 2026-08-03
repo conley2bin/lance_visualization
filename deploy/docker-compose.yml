@@ -19,6 +19,8 @@ services:
       - ../frontend:/app/frontend:ro
       # 导出工具（docker exec 可直接使用容器内 Python 环境运行）
       - ../tools:/app/tools:ro
+      # 位姿导出输出目录（可写；数据挂载均为只读）
+      - ../export_out:/export_out
       # 资源与数据挂载
       - ${HOST_ASSETS_PATH:-../assets}:/app/assets:ro
       - ${HOST_DATA_PATH}:/data:ro

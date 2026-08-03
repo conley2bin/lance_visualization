@@ -187,10 +187,10 @@ uvicorn app:app --host 0.0.0.0 --port 8868
 
 ```bash
 docker exec human-viz python tools/export_object_poses.py \
-  /data/xxx.lance --out /data/export_out
+  /data/xxx.lance --out /export_out
 ```
 
-注意容器内路径：`/data` 就是 `.env` 里 `HOST_DATA_PATH` 指向的宿主机目录，导出结果会写回宿主机该目录下的 `export_out/`。
+路径说明：数据挂载（`/data` 等）在容器内是**只读**的，导出请固定写 `/export_out`——它映射到宿主机**仓库根目录下的 `export_out/`**，结果到那里拿。
 
 **B. uv 环境（按 4.6 节做过 `uv sync`）**
 
