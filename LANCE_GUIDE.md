@@ -76,6 +76,8 @@ vim .env
 HOST_DATA_PATH=/path/to/lance_datasets
 ```
 
+注意：填的是 `.lance` 的**上级目录**（可放多个数据集），不是某个 `.lance` 本身。具体加载哪个数据集在前端"浏览"中选择，可随时切换；加载校验要求所选路径以 `.lance` 结尾，直接挂载单个数据集会导致无法加载。
+
 其余配置均有默认值，公网环境开箱即用：
 
 - 基础镜像默认 `python:3.10`（Docker Hub）。拉不动时在 `.env` 加一行 `BASE_IMAGE=<公共加速器地址>`，如 `docker.1ms.run/library/python:3.10`（可用性以当时 `docker pull` 实测为准）
@@ -166,6 +168,7 @@ bottle_rot = d["rot_aa_1_bottle"]  # (T,3) 轴角弧度
 | 3D 场景没有物体只有手 | 物体 mesh 没放对：确认 `assets/objects/<名>/<名>_aligned.stl` 存在 |
 | 页面崩溃/卡死 | 关掉 "URDF Mesh" 刷新 |
 | "浏览"看不到数据目录 | 数据必须在 `HOST_DATA_PATH` 或 `HOST_NAS_PATH` 挂载范围内；改 `.env` 后 `docker compose up -d` 重建容器 |
+| 加载报"请选择 .lance 数据集路径" | `HOST_DATA_PATH` 填了 `.lance` 本身；改为填其上级目录，在前端里再选择具体 `.lance` |
 
 ## 8. 完全离线场景
 
