@@ -43,7 +43,39 @@ Lance 数据集（手/物体/视频）+ assets 资源（MANO 模型、URDF、物
 
 ## 4. 部署
 
-### 4.1 拿到什么（三件套）
+### 4.1 环境配置
+
+**操作系统**：Linux（x86_64，推荐 Ubuntu 20.04+）。以下命令以 Ubuntu 为例。
+
+**方式 A：Docker（推荐，客户默认走这条）**
+
+```bash
+# 安装 Docker 与 Compose 插件（已装过可跳过）
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER   # 免 sudo 运行 docker，重新登录后生效
+docker compose version          # 验证：输出 v2.x 即可
+```
+
+**方式 B：本地 Python 环境（无 Docker 时，见 4.6 节）**
+
+- **Python 必须 3.10**（chumpy/manotorch 依赖在 3.11+ 不兼容）。Ubuntu 装 3.10：
+  ```bash
+  sudo apt install python3.10 python3.10-venv
+  ```
+- 推荐安装 uv（依赖一条命令装齐）：
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+**资源与网络要求**
+
+| 项 | 要求 |
+|---|---|
+| 磁盘 | 镜像约 4.5GB，加数据与网格包预留 10GB 以上 |
+| 内存 | 建议 8GB+（单条轨迹加载峰值约 2-4GB） |
+| 网络（仅构建/装依赖时需要） | Docker Hub 或其加速器、pypi（默认清华镜像）、GitHub（chumpy/manotorch 源码） |
+
+### 4.2 拿到什么（三件套）
 
 | 内容 | 来源 | 说明 |
 |---|---|---|
@@ -51,7 +83,7 @@ Lance 数据集（手/物体/视频）+ assets 资源（MANO 模型、URDF、物
 | 物体网格包 `objects.tar.xz` | 百度网盘 | 42 个物体的 mesh，约 336MB，解压到 `assets/` |
 | Lance 数据集 `.lance` | 百度网盘 | 要可视化的数据，放到本机任意目录 |
 
-### 4.2 放置文件
+### 4.3 放置文件
 
 ```bash
 # 物体网格（sha256 校验和文件可用来核对下载完整性）
@@ -62,7 +94,7 @@ ls /path/to/lance_visualization/assets/objects/bottle/bottle_aligned.stl   # 应
 
 缺这一步：3D 场景只显示手，不显示被操作的物体。
 
-### 4.3 配置 `deploy/.env`
+### 4.4 配置 `deploy/.env`
 
 ```bash
 cd lance_visualization/deploy
@@ -84,7 +116,7 @@ HOST_DATA_PATH=/path/to/lance_datasets
 - 数据目录同时挂载到容器 `/data` 和 NAS 同名路径，前端里直接填宿主机真实路径
 - 端口默认 8868；数据库功能默认关闭（仅影响"最近数据源"列表，不影响可视化）
 
-### 4.4 构建、启动、验证
+### 4.5 构建、启动、验证
 
 ```bash
 docker compose up -d --build     # 首次 5-10 分钟，之后秒级
@@ -94,7 +126,7 @@ docker logs human-viz               # 看到 Application startup complete
 curl http://localhost:8868/         # 返回 HTML
 ```
 
-### 4.5 备选：不用 Docker 本地运行
+### 4.6 备选：不用 Docker 本地运行
 
 机器上没有 Docker 时可以直接跑 Python 环境（**必须 Python 3.10**，chumpy/manotorch 在 3.11+ 不兼容）：
 
