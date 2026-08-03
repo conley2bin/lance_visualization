@@ -1,0 +1,7 @@
+/objects/**/visualizations_*/
+__pycache__/
+deleted_gestures/
+
+*.bkp
+/objects/**/log_*.txt
+/gestures/gestures.yaml
