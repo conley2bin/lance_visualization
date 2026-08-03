@@ -173,16 +173,48 @@ uvicorn app:app --host 0.0.0.0 --port 8868
 
 页面卡死时直接刷新：URL 里的 `?lance=...&traj=N` 参数会自动恢复数据源和轨迹。
 
-## 6. 导出物体位姿（给客户分析）
+## 6. 导出物体位姿
 
-仓库自带导出脚本 `tools/export_object_poses.py`，批量提取数据集中**每条轨迹、每个物体、每一帧的刚体位姿**，无需启动可视化服务，直接用 Python 跑：
+仓库自带导出脚本 `tools/export_object_poses.py`，批量提取数据集中**每条轨迹、每个物体、每一帧的刚体位姿**，无需启动可视化页面。
+
+### 6.1 环境准备（三选一）
+
+脚本依赖 `lance` 和 `numpy`，以下任选一种环境运行：
+
+**A. 用已部署的 Docker 容器（推荐，无需额外装环境）**
+
+可视化服务跑起来后，容器自带全部依赖，直接 `docker exec` 调用：
 
 ```bash
-# 全量导出整个数据集
+docker exec human-viz python tools/export_object_poses.py \
+  /data/xxx.lance --out /data/export_out
+```
+
+注意容器内路径：`/data` 就是 `.env` 里 `HOST_DATA_PATH` 指向的宿主机目录，导出结果会写回宿主机该目录下的 `export_out/`。
+
+**B. uv 环境（按 4.6 节做过 `uv sync`）**
+
+```bash
+uv run python tools/export_object_poses.py /path/to/xxx.lance --out ./export_out
+```
+
+**C. venv + pip 环境（按 4.6 节 pip 路线装好）**
+
+```bash
+source .venv/bin/activate
 python tools/export_object_poses.py /path/to/xxx.lance --out ./export_out
+```
+
+> 如果系统提示 `python: command not found`，说明还没配环境：回去按 4.6 节装一种，或直接用方式 A。
+
+### 6.2 导出命令
+
+```bash
+# 全量导出整个数据集（以方式 B 为例，其他环境同命令前缀）
+uv run python tools/export_object_poses.py /path/to/xxx.lance --out ./export_out
 
 # 只导出第 0 条轨迹（验证用）
-python tools/export_object_poses.py /path/to/xxx.lance --out ./export_out --index 0
+uv run python tools/export_object_poses.py /path/to/xxx.lance --out ./export_out --index 0
 ```
 
 每条轨迹输出一个目录：
